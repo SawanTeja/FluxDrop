@@ -25,7 +25,9 @@ private:
     GtkWidget* progress_bar_;
     GtkWidget* progress_label_;
     GtkWidget* info_label_;
+    GtkWidget* save_label_;
     GtkWindow* parent_window_;
+    std::string save_dir_;
 
     networking::DiscoveryListener listener_;
     std::map<std::string, networking::DiscoveredDevice> devices_;

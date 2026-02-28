@@ -10,6 +10,7 @@
 #include <sys/statvfs.h>
 #include <sys/stat.h>
 #include <iomanip>
+#include <filesystem>
 
 using boost::asio::ip::tcp;
 
@@ -234,7 +235,18 @@ void Client::connect(const std::string& ip, unsigned short port) {
             return;
         }
         std::cout << "Authenticated! Waiting for file streams...\n";
-        
+
+        // Ask where to save files
+        std::cout << "Save files to (default: current directory): ";
+        std::string save_dir;
+        std::getline(std::cin, save_dir);
+        if (save_dir.empty()) save_dir = ".";
+        // Create save directory if needed
+        if (save_dir != ".") {
+            std::filesystem::create_directories(save_dir);
+        }
+        std::cout << "Saving to: " << std::filesystem::absolute(save_dir) << "\n";
+
         while (true) {
             protocol::PacketHeader header = transfer::MessageReceiver::receive_header(socket);
             
@@ -268,7 +280,8 @@ void Client::connect(const std::string& ip, unsigned short port) {
                 // Check if .fluxpart already exists to resume
                 uint64_t resume_offset = 0;
                 struct stat file_stat;
-                std::string part_file = meta.filename + ".fluxpart";
+                std::string save_path = save_dir + "/" + meta.filename;
+                std::string part_file = save_path + ".fluxpart";
                 if (stat(part_file.c_str(), &file_stat) == 0) {
                     resume_offset = file_stat.st_size;
                     std::cout << "Found partial download. " << format_size(resume_offset) << " out of " << format_size(meta.size) << " downloaded.\n";
@@ -290,7 +303,7 @@ void Client::connect(const std::string& ip, unsigned short port) {
                         transfer::MessageSender::send_header(socket, accept_header);
                     }
                     
-                    transfer::TransferState state = transfer::MessageReceiver::receive_file(socket, meta.filename, meta.size, resume_offset);
+                    transfer::TransferState state = transfer::MessageReceiver::receive_file(socket, save_path, meta.size, resume_offset);
                     if (state == transfer::TransferState::COMPLETED) {
                         std::cout << "Download complete!\n";
                     } else if (state == transfer::TransferState::CANCELLED) {
@@ -528,7 +541,8 @@ void Server::start_gui(std::queue<TransferJob> jobs, ServerCallbacks callbacks) 
 // ─── Client GUI Mode ────────────────────────────────────────────────────────
 
 void Client::connect_gui(const std::string& ip, unsigned short port,
-                          const std::string& pin, ClientCallbacks callbacks) {
+                          const std::string& pin, const std::string& save_dir,
+                          ClientCallbacks callbacks) {
     try {
         boost::asio::io_context io_context;
         tcp::socket socket(io_context);
@@ -576,8 +590,10 @@ void Client::connect_gui(const std::string& ip, unsigned short port,
                 protocol::PacketHeader accept{static_cast<uint32_t>(protocol::CommandType::PONG), 0, header.session_id, 0};
                 transfer::MessageSender::send_header(socket, accept);
 
+                std::string save_path = save_dir.empty() ? meta.filename : (save_dir + "/" + meta.filename);
+
                 transfer::TransferState state = transfer::MessageReceiver::receive_file(
-                    socket, meta.filename, meta.size, 0, callbacks.on_progress);
+                    socket, save_path, meta.size, 0, callbacks.on_progress);
 
                 if (state == transfer::TransferState::COMPLETED) {
                     if (callbacks.on_status) callbacks.on_status("Received: " + meta.filename);

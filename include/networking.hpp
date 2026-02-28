@@ -66,7 +66,8 @@ public:
     void connect(const std::string& ip, unsigned short port);
     void join(uint32_t room_id);
     void connect_gui(const std::string& ip, unsigned short port,
-                     const std::string& pin, ClientCallbacks callbacks);
+                     const std::string& pin, const std::string& save_dir,
+                     ClientCallbacks callbacks);
 };
 
 } // namespace networking
