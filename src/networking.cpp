@@ -30,6 +30,8 @@ void Server::start() {
         tcp::socket socket(io_context);
         acceptor.accept(socket);
         
+        protocol::PacketHeader header{1, 0, 42, 0};
+        transfer::MessageSender::send_header(socket, header);
         transfer::MessageSender::send(socket, "Hello from server");
     } catch (std::exception& e) {
         std::cerr << "Server Exception: " << e.what() << "\n";
@@ -45,6 +47,12 @@ void Client::connect(const std::string& ip, unsigned short port) {
         
         std::cout << "Connected to peer\n";
         
+        protocol::PacketHeader header = transfer::MessageReceiver::receive_header(socket);
+        std::cout << "Received Header - Command: " << header.command 
+                  << " Payload Size: " << header.payload_size 
+                  << " Session ID: " << header.session_id 
+                  << " Reserved: " << header.reserved << std::endl;
+
         std::string response = transfer::MessageReceiver::receive(socket);
         std::cout << "Received: " << response << std::endl;
     } catch (std::exception& e) {
