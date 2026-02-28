@@ -1,6 +1,7 @@
 #include "transfer.hpp"
 #include <iostream>
 #include <vector>
+#include <fstream>
 
 namespace transfer {
 
@@ -80,6 +81,107 @@ protocol::FileInfo MessageReceiver::receive_file_meta(boost::asio::ip::tcp::sock
         std::cerr << "MessageReceiver Exception (meta): " << e.what() << "\n";
     }
     return info;
+}
+
+bool MessageSender::send_file(boost::asio::ip::tcp::socket& socket, const std::string& filepath, uint32_t session_id) {
+    try {
+        std::ifstream file(filepath, std::ios::binary);
+        if (!file.is_open()) {
+            std::cerr << "Could not open file for reading: " << filepath << "\n";
+            return false;
+        }
+
+        std::vector<char> buffer(64 * 1024); // 64KB per chunk
+        while (file.read(buffer.data(), buffer.size()) || file.gcount() > 0) {
+            std::streamsize bytes_read = file.gcount();
+            protocol::PacketHeader header{
+                static_cast<uint32_t>(protocol::CommandType::FILE_CHUNK),
+                static_cast<uint32_t>(bytes_read),
+                session_id, 0
+            };
+            send_header(socket, header);
+            boost::asio::write(socket, boost::asio::buffer(buffer.data(), bytes_read));
+        }
+        return true;
+    } catch (std::exception& e) {
+        std::cerr << "MessageSender Exception (send_file): " << e.what() << "\n";
+        return false;
+    }
+}
+
+bool MessageReceiver::receive_file(boost::asio::ip::tcp::socket& socket, const std::string& filepath, uint64_t expected_size) {
+    try {
+        std::string part_file = filepath + ".fluxpart";
+        std::ofstream file(part_file, std::ios::binary);
+        if (!file.is_open()) {
+            std::cerr << "Could not open file for writing: " << part_file << "\n";
+            return false;
+        }
+
+        uint64_t total_received = 0;
+        auto start_time = std::chrono::steady_clock::now();
+        auto last_print_time = start_time;
+
+        while (total_received < expected_size) {
+            protocol::PacketHeader header = receive_header(socket);
+            
+            if (header.command == static_cast<uint32_t>(protocol::CommandType::FILE_CHUNK)) {
+                std::vector<char> buffer(header.payload_size);
+                boost::asio::read(socket, boost::asio::buffer(buffer));
+                file.write(buffer.data(), buffer.size());
+                total_received += header.payload_size;
+
+                // --- Progress Tracking ---
+                auto now = std::chrono::steady_clock::now();
+                auto elapsed_since_print = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_print_time).count();
+                
+                // Update terminal every ~500ms or on completion
+                if (elapsed_since_print >= 500 || total_received == expected_size) {
+                    double elapsed_seconds = std::chrono::duration<double>(now - start_time).count();
+                    double speed_bps = (elapsed_seconds > 0) ? (total_received / elapsed_seconds) : 0;
+                    double speed_mbps = speed_bps / (1024.0 * 1024.0);
+                    
+                    int percent = (expected_size > 0) ? static_cast<int>((total_received * 100.0) / expected_size) : 100;
+                    
+                    uint64_t remaining_bytes = expected_size - total_received;
+                    double eta_seconds = (speed_bps > 0) ? (remaining_bytes / speed_bps) : 0;
+                    
+                    int eta_min = static_cast<int>(eta_seconds) / 60;
+                    int eta_sec = static_cast<int>(eta_seconds) % 60;
+
+                    std::cout << "\r" << percent << "% | " 
+                              << std::fixed << std::setprecision(1) << speed_mbps << " MB/s | "
+                              << "ETA " << std::setfill('0') << std::setw(2) << eta_min << ":"
+                              << std::setfill('0') << std::setw(2) << eta_sec << "    " << std::flush;
+                    
+                    last_print_time = now;
+                }
+
+            } else if (header.command == static_cast<uint32_t>(protocol::CommandType::CANCEL)) {
+                std::cout << "\nTransfer cancelled by sender.\n";
+                file.close();
+                std::remove(part_file.c_str());
+                return false;
+            } else if (header.command == static_cast<uint32_t>(protocol::CommandType::PING)) {
+                protocol::PacketHeader pong_header{static_cast<uint32_t>(protocol::CommandType::PONG), 0, header.session_id, 0};
+                MessageSender::send_header(socket, pong_header);
+            }
+        }
+        std::cout << "\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b" << std::flush; // clear line
+        std::cout << "\nFile transfer completed successfully.\n";
+        file.close();
+        
+        // Rename .fluxpart to final filename
+        if (std::rename(part_file.c_str(), filepath.c_str()) != 0) {
+             std::cerr << "Failed to rename temp file to: " << filepath << "\n";
+             return false;
+        }
+
+        return true;
+    } catch (std::exception& e) {
+        std::cerr << "\nMessageReceiver Exception (receive_file): " << e.what() << "\n";
+        return false;
+    }
 }
 
 } // namespace transfer

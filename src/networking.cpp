@@ -75,7 +75,7 @@ void Server::start(uint32_t session_id) {
         }
 
         // Simulating the server requesting to send a file
-        protocol::FileInfo file_info{"movie.mkv", 1288490188 /* ~1.2 GB */, "video/x-matroska"};
+        protocol::FileInfo file_info{"movie.mkv", 10 * 1024 * 1024 /* 10 MB Dummy Stream */, "video/x-matroska"};
         transfer::MessageSender::send_file_meta(socket, file_info);
 
         while (true) {
@@ -90,6 +90,9 @@ void Server::start(uint32_t session_id) {
             if (header.command == static_cast<uint32_t>(protocol::CommandType::PING)) {
                 protocol::PacketHeader pong_header{static_cast<uint32_t>(protocol::CommandType::PONG), 0, header.session_id, 0};
                 transfer::MessageSender::send_header(socket, pong_header);
+            } else if (header.command == static_cast<uint32_t>(protocol::CommandType::PONG)) { // Used here as implicit accept packet
+                std::cout << "Client accepted file transfer. Sending file chunks...\n";
+                transfer::MessageSender::send_file(socket, file_info.filename, header.session_id);
             } else if (header.command == static_cast<uint32_t>(protocol::CommandType::CANCEL)) {
                 std::cout << "Client rejected the file transfer.\n";
                 break;
@@ -174,7 +177,13 @@ void Client::connect(const std::string& ip, unsigned short port) {
             std::getline(std::cin, answer);
             
             if (answer == "y" || answer == "Y") {
-                std::cout << "File accepted. (Downloading not yet implemented)\n";
+                std::cout << "File accepted. Downloading...\n";
+                protocol::PacketHeader accept_header{static_cast<uint32_t>(protocol::CommandType::PONG), 0, header.session_id, 0};
+                transfer::MessageSender::send_header(socket, accept_header);
+                
+                if (transfer::MessageReceiver::receive_file(socket, "downloaded_" + meta.filename, meta.size)) {
+                    std::cout << "Download complete!\n";
+                }
             } else {
                 std::cout << "File rejected.\n";
                 protocol::PacketHeader cancel_header{static_cast<uint32_t>(protocol::CommandType::CANCEL), 0, header.session_id, 0};
