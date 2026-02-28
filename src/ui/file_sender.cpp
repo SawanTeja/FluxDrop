@@ -149,7 +149,7 @@ FileSenderPanel::FileSenderPanel(GtkWindow* parent_window)
     gtk_widget_set_halign(action_box, GTK_ALIGN_CENTER);
     gtk_widget_set_margin_top(action_box, 4);
 
-    send_button_ = gtk_button_new_with_label("🚀 Start Sharing");
+    send_button_ = gtk_button_new_with_label("Start Sharing");
     gtk_widget_add_css_class(send_button_, "suggested-action");
     gtk_widget_set_sensitive(send_button_, FALSE);
     g_signal_connect(send_button_, "clicked", G_CALLBACK(on_send_clicked), this);

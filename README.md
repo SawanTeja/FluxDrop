@@ -1,6 +1,6 @@
 # FluxDrop
 
-A fast, secure peer-to-peer file transfer tool for local networks. Transfer files and directories between machines on the same LAN with PIN-based authentication, chunked transfers with resume support, and real-time progress tracking.
+A fast, secure, cross-platform (Windows & Linux) peer-to-peer file transfer tool for local networks. Transfer files and directories between machines on the same LAN with PIN-based authentication, chunked transfers with resume support, and real-time progress tracking.
 
 ## Features
 
@@ -71,23 +71,33 @@ A fast, secure peer-to-peer file transfer tool for local networks. Transfer file
 | libsodium     | PIN hashing (BLAKE2b)  | `sudo dnf install libsodium-devel`       | `sudo apt install libsodium-dev`     |
 | nlohmann-json | JSON file metadata     | `sudo dnf install json-devel`            | `sudo apt install nlohmann-json3-dev`|
 | pkg-config    | Dependency resolution  | `sudo dnf install pkgconf-pkg-config`    | `sudo apt install pkg-config`        |
+| GTK4          | Graphical UI           | `sudo dnf install gtk4-devel`            | `sudo apt install libgtk-4-dev`      |
 
-### Install all at once
+### Install all at once (Linux)
 
 **Fedora:**
 ```bash
-sudo dnf install cmake gcc-c++ boost-devel libsodium-devel json-devel pkgconf-pkg-config
+sudo dnf install cmake gcc-c++ boost-devel libsodium-devel json-devel pkgconf-pkg-config gtk4-devel
 ```
 
 **Ubuntu/Debian:**
 ```bash
 sudo apt update
-sudo apt install cmake g++ libboost-all-dev libsodium-dev nlohmann-json3-dev pkg-config
+sudo apt install cmake g++ libboost-all-dev libsodium-dev nlohmann-json3-dev pkg-config libgtk-4-dev
+```
+
+### Install all at once (Windows MSYS2 UCRT64)
+
+Open the **MSYS2 UCRT64** terminal and run:
+```bash
+pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-boost mingw-w64-ucrt-x86_64-libsodium mingw-w64-ucrt-x86_64-nlohmann-json mingw-w64-ucrt-x86_64-gtk4
 ```
 
 ---
 
 ## Building
+
+### Linux
 
 ```bash
 cd ~/FluxDrop
@@ -96,7 +106,18 @@ cmake ..
 make -j$(nproc)
 ```
 
-The binary is produced at `~/FluxDrop/build/fluxdrop`.
+The binary is produced at `build/fluxdrop`.
+
+### Windows (MSYS2 / UCRT64)
+
+```bash
+cd /c/path/to/FluxDrop
+mkdir -p build && cd build
+cmake -G "MinGW Makefiles" ..
+cmake --build . -j%NUMBER_OF_PROCESSORS%
+```
+
+The binary is produced at `build/fluxdrop.exe`.
 
 ---
 

@@ -9,6 +9,8 @@
 #include <chrono>
 #include <iomanip>
 #include <filesystem>
+#include <random>
+
 #ifdef _WIN32
   #include <windows.h>
 #else
@@ -40,6 +42,20 @@ std::string format_size(uint64_t bytes) {
     char buf[32];
     snprintf(buf, sizeof(buf), "%.1f%s", size, units[i]);
     return std::string(buf);
+}
+
+std::string get_instance_id() {
+    static std::string instance_id;
+    if (instance_id.empty()) {
+        const char charset[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution<> dis(0, sizeof(charset) - 2);
+        for (int i = 0; i < 16; ++i) {
+            instance_id += charset[dis(gen)];
+        }
+    }
+    return instance_id;
 }
 
 void Server::start(std::queue<TransferJob> jobs) {
@@ -78,7 +94,7 @@ void Server::start(std::queue<TransferJob> jobs) {
                 boost::asio::ip::udp::endpoint broadcast_endpoint(boost::asio::ip::address_v4::broadcast(), 45454);
                 
                 while (running) {
-                    std::string message = "FLUXDROP|" + std::to_string(session_id) + "|" + std::to_string(port);
+                    std::string message = "FLUXDROP|" + std::to_string(session_id) + "|" + std::to_string(port) + "|" + get_instance_id();
                     udp_socket.send_to(boost::asio::buffer(message), broadcast_endpoint);
                     std::this_thread::sleep_for(std::chrono::seconds(1));
                 }
@@ -183,14 +199,29 @@ void Client::join(uint32_t room_id) {
             std::string message(recv_buf.data(), len);
             
             if (message.find("FLUXDROP|") == 0) {
-                // Parse format: FLUXDROP|<session>|<port>
+                // Parse format: FLUXDROP|<session>|<port>[|<instance_id>]
                 size_t first_pipe = message.find('|');
                 size_t second_pipe = message.find('|', first_pipe + 1);
+                size_t third_pipe = message.find('|', second_pipe + 1);
                 
                 if (first_pipe != std::string::npos && second_pipe != std::string::npos) {
                     uint32_t received_session = std::stoul(message.substr(first_pipe + 1, second_pipe - first_pipe - 1));
-                    unsigned short port = std::stoi(message.substr(second_pipe + 1));
-                    
+                    unsigned short port;
+                    std::string instance_id;
+
+                    if (third_pipe != std::string::npos) {
+                        port = std::stoi(message.substr(second_pipe + 1, third_pipe - second_pipe - 1));
+                        instance_id = message.substr(third_pipe + 1);
+                    } else {
+                        // Backwards compatibility for old format
+                        port = std::stoi(message.substr(second_pipe + 1));
+                    }
+
+                    // Ignore broadcasts originating from our own instance ID
+                    if (instance_id == get_instance_id()) {
+                        continue;
+                    }
+
                     if (received_session == room_id) {
                         std::string target_ip = sender_endpoint.address().to_string();
                         std::cout << "Found host: " << target_ip << " room " << room_id << "\n";
@@ -383,13 +414,25 @@ void DiscoveryListener::start(DeviceFoundCallback callback) {
                 if (message.find("FLUXDROP|") == 0) {
                     size_t first_pipe = message.find('|');
                     size_t second_pipe = message.find('|', first_pipe + 1);
+                    size_t third_pipe = message.find('|', second_pipe + 1);
 
                     if (first_pipe != std::string::npos && second_pipe != std::string::npos) {
                         DiscoveredDevice device;
                         device.session_id = std::stoul(message.substr(first_pipe + 1, second_pipe - first_pipe - 1));
-                        device.port = std::stoi(message.substr(second_pipe + 1));
-                        device.ip = sender_ip;
+                        std::string instance_id;
 
+                        if (third_pipe != std::string::npos) {
+                            device.port = std::stoi(message.substr(second_pipe + 1, third_pipe - second_pipe - 1));
+                            instance_id = message.substr(third_pipe + 1);
+                        } else {
+                            // Backwards compatibility for old format
+                            device.port = std::stoi(message.substr(second_pipe + 1));
+                        }
+
+                        // Ignore our own broadcasts
+                        if (instance_id == get_instance_id()) continue;
+
+                        device.ip = sender_ip;
                         if (callback) callback(device);
                     }
                 }
@@ -442,7 +485,7 @@ void Server::start_gui(std::queue<TransferJob> jobs, ServerCallbacks callbacks) 
                     boost::asio::ip::address_v4::broadcast(), 45454);
 
                 while (broadcasting) {
-                    std::string msg = "FLUXDROP|" + std::to_string(session_id) + "|" + std::to_string(port);
+                    std::string msg = "FLUXDROP|" + std::to_string(session_id) + "|" + std::to_string(port) + "|" + get_instance_id();
                     udp_socket.send_to(boost::asio::buffer(msg), broadcast_ep);
                     std::this_thread::sleep_for(std::chrono::seconds(1));
                 }
