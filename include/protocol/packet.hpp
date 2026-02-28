@@ -10,7 +10,8 @@ enum class CommandType : uint32_t {
     FILE_CHUNK = 2,
     CANCEL = 3,
     PING = 4,
-    PONG = 5
+    PONG = 5,
+    RESUME = 6
 };
 
 // Fixed 16-byte header

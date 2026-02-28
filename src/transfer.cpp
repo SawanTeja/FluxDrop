@@ -83,12 +83,16 @@ protocol::FileInfo MessageReceiver::receive_file_meta(boost::asio::ip::tcp::sock
     return info;
 }
 
-bool MessageSender::send_file(boost::asio::ip::tcp::socket& socket, const std::string& filepath, uint32_t session_id) {
+bool MessageSender::send_file(boost::asio::ip::tcp::socket& socket, const std::string& filepath, uint32_t session_id, uint64_t start_offset) {
     try {
         std::ifstream file(filepath, std::ios::binary);
         if (!file.is_open()) {
             std::cerr << "Could not open file for reading: " << filepath << "\n";
             return false;
+        }
+
+        if (start_offset > 0) {
+            file.seekg(start_offset);
         }
 
         std::vector<char> buffer(64 * 1024); // 64KB per chunk
@@ -109,16 +113,23 @@ bool MessageSender::send_file(boost::asio::ip::tcp::socket& socket, const std::s
     }
 }
 
-bool MessageReceiver::receive_file(boost::asio::ip::tcp::socket& socket, const std::string& filepath, uint64_t expected_size) {
+TransferState MessageReceiver::receive_file(boost::asio::ip::tcp::socket& socket, const std::string& filepath, uint64_t expected_size, uint64_t start_offset) {
     try {
         std::string part_file = filepath + ".fluxpart";
-        std::ofstream file(part_file, std::ios::binary);
+        
+        // Open in append mode if we have a start_offset
+        std::ios_base::openmode mode = std::ios::binary;
+        if (start_offset > 0) {
+            mode |= std::ios::app;
+        }
+        
+        std::ofstream file(part_file, mode);
         if (!file.is_open()) {
             std::cerr << "Could not open file for writing: " << part_file << "\n";
-            return false;
+            return TransferState::ERROR;
         }
 
-        uint64_t total_received = 0;
+        uint64_t total_received = start_offset;
         auto start_time = std::chrono::steady_clock::now();
         auto last_print_time = start_time;
 
@@ -138,7 +149,10 @@ bool MessageReceiver::receive_file(boost::asio::ip::tcp::socket& socket, const s
                 // Update terminal every ~500ms or on completion
                 if (elapsed_since_print >= 500 || total_received == expected_size) {
                     double elapsed_seconds = std::chrono::duration<double>(now - start_time).count();
-                    double speed_bps = (elapsed_seconds > 0) ? (total_received / elapsed_seconds) : 0;
+                    
+                    // Note: speed and ETA only account for the *current* session transfer speed, ignoring the offset duration
+                    uint64_t session_received = total_received - start_offset;
+                    double speed_bps = (elapsed_seconds > 0) ? (session_received / elapsed_seconds) : 0;
                     double speed_mbps = speed_bps / (1024.0 * 1024.0);
                     
                     int percent = (expected_size > 0) ? static_cast<int>((total_received * 100.0) / expected_size) : 100;
@@ -161,7 +175,7 @@ bool MessageReceiver::receive_file(boost::asio::ip::tcp::socket& socket, const s
                 std::cout << "\nTransfer cancelled by sender.\n";
                 file.close();
                 std::remove(part_file.c_str());
-                return false;
+                return TransferState::CANCELLED;
             } else if (header.command == static_cast<uint32_t>(protocol::CommandType::PING)) {
                 protocol::PacketHeader pong_header{static_cast<uint32_t>(protocol::CommandType::PONG), 0, header.session_id, 0};
                 MessageSender::send_header(socket, pong_header);
@@ -174,13 +188,13 @@ bool MessageReceiver::receive_file(boost::asio::ip::tcp::socket& socket, const s
         // Rename .fluxpart to final filename
         if (std::rename(part_file.c_str(), filepath.c_str()) != 0) {
              std::cerr << "Failed to rename temp file to: " << filepath << "\n";
-             return false;
+             return TransferState::ERROR;
         }
 
-        return true;
+        return TransferState::COMPLETED;
     } catch (std::exception& e) {
         std::cerr << "\nMessageReceiver Exception (receive_file): " << e.what() << "\n";
-        return false;
+        return TransferState::ERROR;
     }
 }
 

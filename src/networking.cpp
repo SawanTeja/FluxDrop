@@ -7,6 +7,7 @@
 #include <thread>
 #include <chrono>
 #include <sys/statvfs.h>
+#include <sys/stat.h>
 #include <iomanip>
 
 using boost::asio::ip::tcp;
@@ -36,8 +37,15 @@ std::string format_size(uint64_t bytes) {
     return std::string(buf);
 }
 
-void Server::start(uint32_t session_id) {
+void Server::start(std::queue<TransferJob> jobs) {
     try {
+        if (jobs.empty()) {
+            std::cout << "No files to transfer.\n";
+            return;
+        }
+        
+        uint32_t session_id = jobs.front().session_id;
+
         boost::asio::io_context io_context;
         tcp::acceptor acceptor(io_context, tcp::endpoint(tcp::v4(), 0));
         
@@ -74,30 +82,50 @@ void Server::start(uint32_t session_id) {
             broadcast_thread.join();
         }
 
-        // Simulating the server requesting to send a file
-        protocol::FileInfo file_info{"movie.mkv", 10 * 1024 * 1024 /* 10 MB Dummy Stream */, "video/x-matroska"};
-        transfer::MessageSender::send_file_meta(socket, file_info);
-
-        while (true) {
-            protocol::PacketHeader header = transfer::MessageReceiver::receive_header(socket);
+        while (!jobs.empty()) {
+            TransferJob job = jobs.front();
             
-            // Checking for disconnect / empty read
-            if (header.command == 0 && header.payload_size == 0 && header.session_id == 0) {
-                std::cout << "Client disconnected.\n";
-                break;
+            struct stat file_stat;
+            if (stat(job.filepath.c_str(), &file_stat) != 0) {
+                std::cerr << "File not found: " << job.filepath << "\n";
+                jobs.pop();
+                continue;
             }
+            
+            protocol::FileInfo file_info{job.filename, static_cast<uint64_t>(file_stat.st_size), "application/octet-stream"};
+            std::cout << "Initiating transfer for " << file_info.filename << "...\n";
+            transfer::MessageSender::send_file_meta(socket, file_info);
 
-            if (header.command == static_cast<uint32_t>(protocol::CommandType::PING)) {
-                protocol::PacketHeader pong_header{static_cast<uint32_t>(protocol::CommandType::PONG), 0, header.session_id, 0};
-                transfer::MessageSender::send_header(socket, pong_header);
-            } else if (header.command == static_cast<uint32_t>(protocol::CommandType::PONG)) { // Used here as implicit accept packet
-                std::cout << "Client accepted file transfer. Sending file chunks...\n";
-                transfer::MessageSender::send_file(socket, file_info.filename, header.session_id);
-            } else if (header.command == static_cast<uint32_t>(protocol::CommandType::CANCEL)) {
-                std::cout << "Client rejected the file transfer.\n";
-                break;
+            bool job_done = false;
+            while (!job_done) {
+                protocol::PacketHeader header = transfer::MessageReceiver::receive_header(socket);
+                
+                // Checking for disconnect / empty read
+                if (header.command == 0 && header.payload_size == 0 && header.session_id == 0) {
+                    std::cout << "Client disconnected.\n";
+                    return; // abort all jobs
+                }
+
+                if (header.command == static_cast<uint32_t>(protocol::CommandType::PING)) {
+                    protocol::PacketHeader pong_header{static_cast<uint32_t>(protocol::CommandType::PONG), 0, header.session_id, 0};
+                    transfer::MessageSender::send_header(socket, pong_header);
+                } else if (header.command == static_cast<uint32_t>(protocol::CommandType::PONG)) { // Implicit Accept
+                    std::cout << "Client accepted " << file_info.filename << ". Sending...\n";
+                    transfer::MessageSender::send_file(socket, job.filepath, header.session_id);
+                    job_done = true;
+                } else if (header.command == static_cast<uint32_t>(protocol::CommandType::RESUME)) {
+                    uint64_t resume_offset = header.payload_size;
+                    std::cout << "Client requested RESUME for " << file_info.filename << " from offset: " << resume_offset << " bytes.\n";
+                    transfer::MessageSender::send_file(socket, job.filepath, header.session_id, resume_offset);
+                    job_done = true;
+                } else if (header.command == static_cast<uint32_t>(protocol::CommandType::CANCEL)) {
+                    std::cout << "Client rejected " << file_info.filename << ".\n";
+                    job_done = true; // Move to next job
+                }
             }
+            jobs.pop();
         }
+        std::cout << "All transfers completed.\n";
     } catch (std::exception& e) {
         std::cerr << "Server Exception: " << e.what() << "\n";
     }
@@ -146,51 +174,81 @@ void Client::connect(const std::string& ip, unsigned short port) {
         tcp::socket socket(io_context);
         tcp::resolver resolver(io_context);
         boost::asio::connect(socket, resolver.resolve(ip, std::to_string(port)));
+        std::cout << "Connected to peer! Waiting for file streams...\n";
         
-        // Wait for server to initiate a file transfer 
-        protocol::PacketHeader header = transfer::MessageReceiver::receive_header(socket);
-        if (header.command == static_cast<uint32_t>(protocol::CommandType::FILE_META)) {
-            protocol::FileInfo meta = transfer::MessageReceiver::receive_file_meta(socket, header.payload_size);
+        while (true) {
+            protocol::PacketHeader header = transfer::MessageReceiver::receive_header(socket);
             
-            std::cout << "Incoming file: " << meta.filename << " (" << format_size(meta.size) << ")\n";
-            
-            // Perform Disk Space Check
-            struct statvfs stat;
-            if (statvfs(".", &stat) != 0) {
-                std::cerr << "Error: Could not determine available disk space.\n";
-                return;
-            }
-            
-            uint64_t available_space = stat.f_bavail * stat.f_frsize;
-            if (available_space < meta.size) {
-                std::cout << "Error: Insufficient disk space! Requires " << format_size(meta.size) 
-                          << " but only " << format_size(available_space) << " available.\n";
-                std::cout << "Rejecting file automatically.\n";
-                protocol::PacketHeader reject_header{static_cast<uint32_t>(protocol::CommandType::CANCEL), 0, header.session_id, 0};
-                transfer::MessageSender::send_header(socket, reject_header);
-                return;
+            if (header.command == 0 && header.payload_size == 0 && header.session_id == 0) {
+                std::cout << "Server closed connection (All files sent or aborted).\n";
+                break;
             }
 
-            // Prompt user
-            std::cout << "Accept? (y/n) ";
-            std::string answer;
-            std::getline(std::cin, answer);
-            
-            if (answer == "y" || answer == "Y") {
-                std::cout << "File accepted. Downloading...\n";
-                protocol::PacketHeader accept_header{static_cast<uint32_t>(protocol::CommandType::PONG), 0, header.session_id, 0};
-                transfer::MessageSender::send_header(socket, accept_header);
+            if (header.command == static_cast<uint32_t>(protocol::CommandType::FILE_META)) {
+                protocol::FileInfo meta = transfer::MessageReceiver::receive_file_meta(socket, header.payload_size);
                 
-                if (transfer::MessageReceiver::receive_file(socket, "downloaded_" + meta.filename, meta.size)) {
-                    std::cout << "Download complete!\n";
+                std::cout << "\nIncoming file: " << meta.filename << " (" << format_size(meta.size) << ")\n";
+                
+                // Perform Disk Space Check
+                struct statvfs disk_stat;
+                if (statvfs(".", &disk_stat) != 0) {
+                    std::cerr << "Error: Could not determine available disk space.\n";
+                    break;
                 }
-            } else {
-                std::cout << "File rejected.\n";
-                protocol::PacketHeader cancel_header{static_cast<uint32_t>(protocol::CommandType::CANCEL), 0, header.session_id, 0};
-                transfer::MessageSender::send_header(socket, cancel_header);
+                
+                uint64_t available_space = disk_stat.f_bavail * disk_stat.f_frsize;
+                if (available_space < meta.size) {
+                    std::cout << "Error: Insufficient disk space! Requires " << format_size(meta.size) 
+                              << " but only " << format_size(available_space) << " available.\n";
+                    std::cout << "Rejecting file automatically.\n";
+                    protocol::PacketHeader reject_header{static_cast<uint32_t>(protocol::CommandType::CANCEL), 0, header.session_id, 0};
+                    transfer::MessageSender::send_header(socket, reject_header);
+                    continue; // Skip to next file
+                }
+
+                // Check if .fluxpart already exists to resume
+                uint64_t resume_offset = 0;
+                struct stat file_stat;
+                std::string part_file = meta.filename + ".fluxpart";
+                if (stat(part_file.c_str(), &file_stat) == 0) {
+                    resume_offset = file_stat.st_size;
+                    std::cout << "Found partial download. " << format_size(resume_offset) << " out of " << format_size(meta.size) << " downloaded.\n";
+                }
+
+                // Prompt user
+                std::cout << "Accept? (y/n) ";
+                std::string answer;
+                std::getline(std::cin, answer);
+                
+                if (answer == "y" || answer == "Y") {
+                    if (resume_offset > 0) {
+                        std::cout << "Resuming file transfer from offset...\n";
+                        protocol::PacketHeader resume_header{static_cast<uint32_t>(protocol::CommandType::RESUME), static_cast<uint32_t>(resume_offset), header.session_id, 0};
+                        transfer::MessageSender::send_header(socket, resume_header);
+                    } else {
+                        std::cout << "File accepted. Downloading...\n";
+                        protocol::PacketHeader accept_header{static_cast<uint32_t>(protocol::CommandType::PONG), 0, header.session_id, 0};
+                        transfer::MessageSender::send_header(socket, accept_header);
+                    }
+                    
+                    transfer::TransferState state = transfer::MessageReceiver::receive_file(socket, meta.filename, meta.size, resume_offset);
+                    if (state == transfer::TransferState::COMPLETED) {
+                        std::cout << "Download complete!\n";
+                    } else if (state == transfer::TransferState::CANCELLED) {
+                        std::cout << "Download successfully cancelled.\n";
+                    } else {
+                        std::cout << "Download failed or interrupted. Leaving .fluxpart for future resume.\n";
+                        break;
+                    }
+                } else {
+                    std::cout << "File rejected.\n";
+                    protocol::PacketHeader cancel_header{static_cast<uint32_t>(protocol::CommandType::CANCEL), 0, header.session_id, 0};
+                    transfer::MessageSender::send_header(socket, cancel_header);
+                }
+            } else if (header.command == static_cast<uint32_t>(protocol::CommandType::PING)) {
+                protocol::PacketHeader pong_header{static_cast<uint32_t>(protocol::CommandType::PONG), 0, header.session_id, 0};
+                transfer::MessageSender::send_header(socket, pong_header);
             }
-        } else {
-            std::cout << "Unexpected command received: " << header.command << "\n";
         }
     } catch (std::exception& e) {
         std::cerr << "Client Exception: " << e.what() << "\n";
