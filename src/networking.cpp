@@ -1,10 +1,13 @@
 #include "networking.hpp"
 #include "transfer.hpp"
 #include "protocol/packet.hpp"
+#include "protocol/file_meta.hpp"
 #include <iostream>
 #include <boost/asio.hpp>
 #include <thread>
 #include <chrono>
+#include <sys/statvfs.h>
+#include <iomanip>
 
 using boost::asio::ip::tcp;
 
@@ -18,6 +21,19 @@ std::string get_local_ip(boost::asio::io_context& io_context) {
     } catch (...) {
         return "127.0.0.1";
     }
+}
+
+std::string format_size(uint64_t bytes) {
+    double size = bytes;
+    const char* units[] = {"B", "KB", "MB", "GB", "TB"};
+    int i = 0;
+    while (size >= 1024 && i < 4) {
+        size /= 1024;
+        i++;
+    }
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%.1f%s", size, units[i]);
+    return std::string(buf);
 }
 
 void Server::start(uint32_t session_id) {
@@ -58,6 +74,10 @@ void Server::start(uint32_t session_id) {
             broadcast_thread.join();
         }
 
+        // Simulating the server requesting to send a file
+        protocol::FileInfo file_info{"movie.mkv", 1288490188 /* ~1.2 GB */, "video/x-matroska"};
+        transfer::MessageSender::send_file_meta(socket, file_info);
+
         while (true) {
             protocol::PacketHeader header = transfer::MessageReceiver::receive_header(socket);
             
@@ -68,9 +88,11 @@ void Server::start(uint32_t session_id) {
             }
 
             if (header.command == static_cast<uint32_t>(protocol::CommandType::PING)) {
-                std::cout << "Received PING, sending PONG...\n";
                 protocol::PacketHeader pong_header{static_cast<uint32_t>(protocol::CommandType::PONG), 0, header.session_id, 0};
                 transfer::MessageSender::send_header(socket, pong_header);
+            } else if (header.command == static_cast<uint32_t>(protocol::CommandType::CANCEL)) {
+                std::cout << "Client rejected the file transfer.\n";
+                break;
             }
         }
     } catch (std::exception& e) {
@@ -122,24 +144,44 @@ void Client::connect(const std::string& ip, unsigned short port) {
         tcp::resolver resolver(io_context);
         boost::asio::connect(socket, resolver.resolve(ip, std::to_string(port)));
         
-        std::cout << "Connected to peer\n";
-        
-        uint32_t session_id = 42; // arbitrary connection session id
-
-        while (true) {
-            std::cout << "Sending PING...\n";
-            protocol::PacketHeader ping_header{static_cast<uint32_t>(protocol::CommandType::PING), 0, session_id, 0};
-            transfer::MessageSender::send_header(socket, ping_header);
+        // Wait for server to initiate a file transfer 
+        protocol::PacketHeader header = transfer::MessageReceiver::receive_header(socket);
+        if (header.command == static_cast<uint32_t>(protocol::CommandType::FILE_META)) {
+            protocol::FileInfo meta = transfer::MessageReceiver::receive_file_meta(socket, header.payload_size);
             
-            protocol::PacketHeader header = transfer::MessageReceiver::receive_header(socket);
-            if (header.command == static_cast<uint32_t>(protocol::CommandType::PONG)) {
-                std::cout << "Received PONG from server.\n";
-            } else {
-                std::cout << "Failed to receive valid PONG, disconnecting.\n";
-                break;
+            std::cout << "Incoming file: " << meta.filename << " (" << format_size(meta.size) << ")\n";
+            
+            // Perform Disk Space Check
+            struct statvfs stat;
+            if (statvfs(".", &stat) != 0) {
+                std::cerr << "Error: Could not determine available disk space.\n";
+                return;
+            }
+            
+            uint64_t available_space = stat.f_bavail * stat.f_frsize;
+            if (available_space < meta.size) {
+                std::cout << "Error: Insufficient disk space! Requires " << format_size(meta.size) 
+                          << " but only " << format_size(available_space) << " available.\n";
+                std::cout << "Rejecting file automatically.\n";
+                protocol::PacketHeader reject_header{static_cast<uint32_t>(protocol::CommandType::CANCEL), 0, header.session_id, 0};
+                transfer::MessageSender::send_header(socket, reject_header);
+                return;
             }
 
-            std::this_thread::sleep_for(std::chrono::seconds(5));
+            // Prompt user
+            std::cout << "Accept? (y/n) ";
+            std::string answer;
+            std::getline(std::cin, answer);
+            
+            if (answer == "y" || answer == "Y") {
+                std::cout << "File accepted. (Downloading not yet implemented)\n";
+            } else {
+                std::cout << "File rejected.\n";
+                protocol::PacketHeader cancel_header{static_cast<uint32_t>(protocol::CommandType::CANCEL), 0, header.session_id, 0};
+                transfer::MessageSender::send_header(socket, cancel_header);
+            }
+        } else {
+            std::cout << "Unexpected command received: " << header.command << "\n";
         }
     } catch (std::exception& e) {
         std::cerr << "Client Exception: " << e.what() << "\n";

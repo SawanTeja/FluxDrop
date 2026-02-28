@@ -22,6 +22,24 @@ void MessageSender::send_header(boost::asio::ip::tcp::socket& socket, const prot
     }
 }
 
+void MessageSender::send_file_meta(boost::asio::ip::tcp::socket& socket, const protocol::FileInfo& info) {
+    try {
+        nlohmann::json j = info;
+        std::string payload = j.dump();
+
+        protocol::PacketHeader header{
+            static_cast<uint32_t>(protocol::CommandType::FILE_META),
+            static_cast<uint32_t>(payload.size()),
+            0, 0
+        };
+        
+        send_header(socket, header);
+        boost::asio::write(socket, boost::asio::buffer(payload));
+    } catch (std::exception& e) {
+        std::cerr << "MessageSender Exception (meta): " << e.what() << "\n";
+    }
+}
+
 std::string MessageReceiver::receive(boost::asio::ip::tcp::socket& socket) {
     try {
         boost::asio::streambuf buf;
@@ -47,6 +65,21 @@ protocol::PacketHeader MessageReceiver::receive_header(boost::asio::ip::tcp::soc
         std::cerr << "MessageReceiver Exception: " << e.what() << "\n";
         return empty_header;
     }
+}
+
+protocol::FileInfo MessageReceiver::receive_file_meta(boost::asio::ip::tcp::socket& socket, uint32_t payload_size) {
+    protocol::FileInfo info;
+    try {
+        std::vector<char> buf(payload_size);
+        boost::asio::read(socket, boost::asio::buffer(buf));
+        
+        std::string payload(buf.begin(), buf.end());
+        nlohmann::json j = nlohmann::json::parse(payload);
+        info = j.get<protocol::FileInfo>();
+    } catch (std::exception& e) {
+        std::cerr << "MessageReceiver Exception (meta): " << e.what() << "\n";
+    }
+    return info;
 }
 
 } // namespace transfer
