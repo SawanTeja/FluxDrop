@@ -63,17 +63,23 @@ A fast, secure peer-to-peer file transfer tool for local networks. Transfer file
 
 ## Prerequisites
 
-| Dependency    | Purpose               | Install (Ubuntu/Debian)              |
-| ------------- | --------------------- | ------------------------------------ |
-| CMake ≥ 3.10  | Build system           | `sudo apt install cmake`             |
-| C++20 compiler| Core language          | `sudo apt install g++` (GCC 10+)     |
-| Boost         | Networking (Asio)      | `sudo apt install libboost-all-dev`  |
-| libsodium     | PIN hashing (BLAKE2b)  | `sudo apt install libsodium-dev`     |
-| nlohmann-json | JSON file metadata     | `sudo apt install nlohmann-json3-dev`|
-| pkg-config    | Dependency resolution  | `sudo apt install pkg-config`        |
+| Dependency    | Purpose               | Install (Fedora)                         | Install (Ubuntu/Debian)              |
+| ------------- | --------------------- | ---------------------------------------- | ------------------------------------ |
+| CMake ≥ 3.10  | Build system           | `sudo dnf install cmake`                 | `sudo apt install cmake`             |
+| C++20 compiler| Core language          | `sudo dnf install gcc-c++`               | `sudo apt install g++`               |
+| Boost         | Networking (Asio)      | `sudo dnf install boost-devel`           | `sudo apt install libboost-all-dev`  |
+| libsodium     | PIN hashing (BLAKE2b)  | `sudo dnf install libsodium-devel`       | `sudo apt install libsodium-dev`     |
+| nlohmann-json | JSON file metadata     | `sudo dnf install json-devel`            | `sudo apt install nlohmann-json3-dev`|
+| pkg-config    | Dependency resolution  | `sudo dnf install pkgconf-pkg-config`    | `sudo apt install pkg-config`        |
 
 ### Install all at once
 
+**Fedora:**
+```bash
+sudo dnf install cmake gcc-c++ boost-devel libsodium-devel json-devel pkgconf-pkg-config
+```
+
+**Ubuntu/Debian:**
 ```bash
 sudo apt update
 sudo apt install cmake g++ libboost-all-dev libsodium-dev nlohmann-json3-dev pkg-config
@@ -84,13 +90,13 @@ sudo apt install cmake g++ libboost-all-dev libsodium-dev nlohmann-json3-dev pkg
 ## Building
 
 ```bash
-# From the project root
+cd ~/FluxDrop
 mkdir -p build && cd build
 cmake ..
 make -j$(nproc)
 ```
 
-The binary is produced at `build/fluxdrop`.
+The binary is produced at `~/FluxDrop/build/fluxdrop`.
 
 ---
 
@@ -101,14 +107,15 @@ FluxDrop has three modes based on command-line arguments:
 ### 1. Send Files (Server Mode)
 
 ```bash
-# Send a single file
-./fluxdrop myfile.txt
+cd /tmp
+~/FluxDrop/build/fluxdrop myfile.txt
+```
 
-# Send multiple files
-./fluxdrop file1.txt file2.pdf image.png
+You can send multiple files or entire directories:
 
-# Send an entire directory (recursive)
-./fluxdrop my_folder/
+```bash
+~/FluxDrop/build/fluxdrop file1.txt file2.pdf image.png
+~/FluxDrop/build/fluxdrop my_folder/
 ```
 
 **What happens:**
@@ -120,7 +127,7 @@ FluxDrop has three modes based on command-line arguments:
 ### 2. Receive Files — Auto-Discovery (Client `join` Mode)
 
 ```bash
-./fluxdrop join <room_id>
+~/FluxDrop/build/fluxdrop join 482913
 ```
 
 **What happens:**
@@ -135,7 +142,7 @@ FluxDrop has three modes based on command-line arguments:
 ### 3. Receive Files — Direct Connect (Client `connect` Mode)
 
 ```bash
-./fluxdrop connect <ip> <port>
+~/FluxDrop/build/fluxdrop connect <ip> <port>
 ```
 
 **What happens:**
@@ -146,21 +153,30 @@ FluxDrop has three modes based on command-line arguments:
 
 ## How to Test Everything
 
+> **Important:** All tests below assume you have already built the project. The binary is at:
+> ```
+> ~/FluxDrop/build/fluxdrop
+> ```
+> Every test requires **two terminal windows** open on the same machine (loopback testing).
+> Replace `<ip>` and `<port>` with the values shown by the sender's output.
+
+---
+
 ### Test 1: Build Verification
 
 Confirms the project compiles without errors.
 
 ```bash
-cd /home/sawan/FluxDrop
+cd ~/FluxDrop
 rm -rf build && mkdir build && cd build
 cmake ..
 make -j$(nproc)
 ```
 
-**Expected:** Build completes with no errors, `fluxdrop` binary exists in `build/`.
+**✅ Pass if:** Build completes with no errors and the binary exists:
 
 ```bash
-ls -la build/fluxdrop
+ls -la ~/FluxDrop/build/fluxdrop
 ```
 
 ---
@@ -169,54 +185,49 @@ ls -la build/fluxdrop
 
 Tests core file send/receive on the same machine.
 
-**Terminal 1 (Sender):**
+**Terminal 1 — Sender:**
 
 ```bash
-# Create a test file
 echo "Hello FluxDrop" > /tmp/testfile.txt
-
-# Start sender
 cd /tmp
-./path/to/fluxdrop testfile.txt
+~/FluxDrop/build/fluxdrop testfile.txt
 ```
 
-**Expected output:**
+You'll see output like:
 ```
 Total files to transfer: 1
-Listening on 192.168.x.x:XXXXX
+Listening on 192.168.1.42:53721
 ┌──────────────────────┐
-│  Room PIN: XXXX       │
+│  Room PIN: 4827       │
 └──────────────────────┘
 ```
 
-**Terminal 2 (Receiver):**
+**Terminal 2 — Receiver (use the IP and port from above):**
 
 ```bash
-mkdir -p /tmp/fluxdrop_recv && cd /tmp/fluxdrop_recv
-
-# Use the IP and port from Terminal 1
-./path/to/fluxdrop connect <ip> <port>
+mkdir -p /tmp/recv && cd /tmp/recv
+~/FluxDrop/build/fluxdrop connect 192.168.1.42 53721
 ```
 
-**Expected flow:**
+Then follow the prompts:
 ```
 Connected to peer!
-Enter room PIN: <type the PIN from Terminal 1>
+Enter room PIN: 4827        ← type the PIN shown in Terminal 1
 Authenticated! Waiting for file streams...
 
 Incoming file: testfile.txt (15.0B)
-Accept? (y/n) y
+Accept? (y/n) y             ← type y
 File accepted. Downloading...
 100% | X.X MB/s | ETA 00:00
 File transfer completed successfully.
 Download complete!
 ```
 
-**Verify:**
+**✅ Pass if:**
 
 ```bash
-cat /tmp/fluxdrop_recv/testfile.txt
-# Should print: Hello FluxDrop
+cat /tmp/recv/testfile.txt
+# Output: Hello FluxDrop
 ```
 
 ---
@@ -225,32 +236,31 @@ cat /tmp/fluxdrop_recv/testfile.txt
 
 Tests UDP broadcast discovery.
 
-**Terminal 1 (Sender):**
+**Terminal 1 — Sender:**
 
 ```bash
 cd /tmp
-./path/to/fluxdrop testfile.txt
+~/FluxDrop/build/fluxdrop testfile.txt
 ```
 
-Note the Room ID is `482913` (default).
+Note the PIN. The default Room ID is `482913`.
 
-**Terminal 2 (Receiver):**
+**Terminal 2 — Receiver:**
 
 ```bash
-mkdir -p /tmp/fluxdrop_join && cd /tmp/fluxdrop_join
-./path/to/fluxdrop join 482913
+mkdir -p /tmp/recv_join && cd /tmp/recv_join
+~/FluxDrop/build/fluxdrop join 482913
 ```
 
-**Expected:**
+**✅ Pass if:** Receiver auto-discovers the sender:
 ```
 Scanning for room 482913 broadcasts...
 Found host: 192.168.x.x room 482913
 Connected to peer!
-Enter room PIN: <type PIN>
-Authenticated! Waiting for file streams...
+Enter room PIN:
 ```
 
-Then the same file accept/reject flow as Test 2.
+Then same accept flow as Test 2.
 
 ---
 
@@ -258,51 +268,51 @@ Then the same file accept/reject flow as Test 2.
 
 Tests that invalid PINs are rejected.
 
-**Terminal 1 (Sender):**
+**Terminal 1 — Sender:**
 
 ```bash
 cd /tmp
-./path/to/fluxdrop testfile.txt
+~/FluxDrop/build/fluxdrop testfile.txt
 ```
 
-**Terminal 2 (Receiver):**
+**Terminal 2 — Receiver:**
 
 ```bash
-./path/to/fluxdrop connect <ip> <port>
-# When prompted for PIN, enter a wrong PIN like: 0000
+~/FluxDrop/build/fluxdrop connect <ip> <port>
+# When prompted, enter a WRONG PIN like: 0000
 ```
 
-**Expected:**
-- Receiver sees: `Authentication failed. Wrong PIN.`
-- Sender sees: `Authentication FAILED. Wrong PIN.`
-- Connection is terminated, no files are sent.
+**✅ Pass if:**
+- Receiver prints: `Authentication failed. Wrong PIN.`
+- Sender prints: `Authentication FAILED. Wrong PIN.`
+- Both sides exit. No files sent.
 
 ---
 
 ### Test 5: File Rejection
 
-Tests that the receiver can reject incoming files.
+Tests that the receiver can decline incoming files.
 
-**Terminal 1 (Sender):**
+**Terminal 1 — Sender:**
 
 ```bash
 cd /tmp
-./path/to/fluxdrop testfile.txt
+~/FluxDrop/build/fluxdrop testfile.txt
 ```
 
-**Terminal 2 (Receiver):**
+**Terminal 2 — Receiver:**
 
 ```bash
-./path/to/fluxdrop connect <ip> <port>
-# Authenticate with correct PIN
+mkdir -p /tmp/recv_reject && cd /tmp/recv_reject
+~/FluxDrop/build/fluxdrop connect <ip> <port>
+# Authenticate with the correct PIN
 # When prompted "Accept? (y/n)", type: n
 ```
 
-**Expected:**
-- Sender sees: `Client rejected testfile.txt.`
-- Sender outputs: `All transfers completed.`
-- Receiver sees: `File rejected.`
-- No file is downloaded.
+**✅ Pass if:**
+- Sender prints: `Client rejected testfile.txt.` → `All transfers completed.`
+- Receiver prints: `File rejected.`
+- No file appears in `/tmp/recv_reject/`
 
 ---
 
@@ -310,34 +320,30 @@ cd /tmp
 
 Tests sending multiple files in one session.
 
-**Terminal 1 (Sender):**
+**Terminal 1 — Sender:**
 
 ```bash
 echo "File A" > /tmp/a.txt
 echo "File B" > /tmp/b.txt
 echo "File C" > /tmp/c.txt
-
 cd /tmp
-./path/to/fluxdrop a.txt b.txt c.txt
+~/FluxDrop/build/fluxdrop a.txt b.txt c.txt
 ```
 
-**Expected output:**
-```
-Total files to transfer: 3
-```
+Sender should print `Total files to transfer: 3`.
 
-**Terminal 2 (Receiver):**
+**Terminal 2 — Receiver:**
 
 ```bash
-mkdir -p /tmp/fluxdrop_multi && cd /tmp/fluxdrop_multi
-./path/to/fluxdrop connect <ip> <port>
-# Authenticate, then accept/reject each file individually
+mkdir -p /tmp/recv_multi && cd /tmp/recv_multi
+~/FluxDrop/build/fluxdrop connect <ip> <port>
+# Authenticate, then accept each of the 3 files
 ```
 
-**Expected:** Each file is offered sequentially. Accept all three and verify:
+**✅ Pass if:**
 
 ```bash
-ls /tmp/fluxdrop_multi/
+ls /tmp/recv_multi/
 # a.txt  b.txt  c.txt
 ```
 
@@ -345,175 +351,155 @@ ls /tmp/fluxdrop_multi/
 
 ### Test 7: Directory Transfer
 
-Tests recursive directory sending with path preservation.
+Tests recursive directory sending with structure preserved.
 
-**Terminal 1 (Sender):**
+**Terminal 1 — Sender:**
 
 ```bash
 mkdir -p /tmp/testdir/subdir
 echo "Root file" > /tmp/testdir/root.txt
 echo "Sub file" > /tmp/testdir/subdir/nested.txt
-
 cd /tmp
-./path/to/fluxdrop testdir/
+~/FluxDrop/build/fluxdrop testdir/
 ```
 
-**Expected output:**
-```
-Queued directory: testdir/ (2 files)
-Total files to transfer: 2
-```
+Sender shows: `Queued directory: testdir/ (2 files)`
 
-**Terminal 2 (Receiver):**
+**Terminal 2 — Receiver:**
 
 ```bash
-mkdir -p /tmp/fluxdrop_dir && cd /tmp/fluxdrop_dir
-./path/to/fluxdrop connect <ip> <port>
+mkdir -p /tmp/recv_dir && cd /tmp/recv_dir
+~/FluxDrop/build/fluxdrop connect <ip> <port>
 # Authenticate and accept both files
 ```
 
-**Verify structure is preserved:**
+**✅ Pass if:** Directory structure is preserved:
 
 ```bash
-find /tmp/fluxdrop_dir/ -type f
-# /tmp/fluxdrop_dir/testdir/root.txt
-# /tmp/fluxdrop_dir/testdir/subdir/nested.txt
+find /tmp/recv_dir/ -type f
+# /tmp/recv_dir/testdir/root.txt
+# /tmp/recv_dir/testdir/subdir/nested.txt
 ```
 
 ---
 
 ### Test 8: Large File Transfer with Progress
 
-Tests transfer speed reporting and progress bar with a large file.
+Tests progress bar (speed + ETA) with a big file.
+
+**Setup:**
 
 ```bash
-# Generate a 100MB test file
 dd if=/dev/urandom of=/tmp/large_test.bin bs=1M count=100
 ```
 
-**Terminal 1 (Sender):**
+**Terminal 1 — Sender:**
 
 ```bash
 cd /tmp
-./path/to/fluxdrop large_test.bin
+~/FluxDrop/build/fluxdrop large_test.bin
 ```
 
-**Terminal 2 (Receiver):**
+**Terminal 2 — Receiver:**
 
 ```bash
-mkdir -p /tmp/fluxdrop_large && cd /tmp/fluxdrop_large
-./path/to/fluxdrop connect <ip> <port>
+mkdir -p /tmp/recv_large && cd /tmp/recv_large
+~/FluxDrop/build/fluxdrop connect <ip> <port>
 # Authenticate and accept
 ```
 
-**Expected during transfer:**
+**✅ Pass if:** You see a live updating progress line like:
 ```
 42% | 823.5 MB/s | ETA 00:01
 ```
 
-The progress line updates in-place (carriage return `\r`). On completion:
-```
-File transfer completed successfully.
-Download complete!
-```
-
-**Verify integrity:**
+And after completion, checksums match:
 
 ```bash
-md5sum /tmp/large_test.bin /tmp/fluxdrop_large/large_test.bin
-# Both hashes should match
+md5sum /tmp/large_test.bin /tmp/recv_large/large_test.bin
 ```
 
 ---
 
 ### Test 9: Transfer Resume (`.fluxpart`)
 
-Tests resume of interrupted downloads.
+Tests that interrupted downloads can be resumed.
 
-**Step 1 — Start a large transfer and interrupt it:**
+**Setup:**
 
 ```bash
 dd if=/dev/urandom of=/tmp/resume_test.bin bs=1M count=200
 ```
 
-**Terminal 1 (Sender):**
+**Step 1 — Start transfer and interrupt mid-way:**
 
-```bash
-cd /tmp
-./path/to/fluxdrop resume_test.bin
-```
-
-**Terminal 2 (Receiver):**
-
-```bash
-mkdir -p /tmp/fluxdrop_resume && cd /tmp/fluxdrop_resume
-./path/to/fluxdrop connect <ip> <port>
-# Authenticate and accept the file
-# Press Ctrl+C midway through the transfer
-```
-
-**Verify partial file:**
-
-```bash
-ls /tmp/fluxdrop_resume/
-# resume_test.bin.fluxpart   <-- partial download exists
-```
-
-**Step 2 — Resume the transfer:**
-
-Restart the sender with the same file, then reconnect:
-
-**Terminal 1:** `./path/to/fluxdrop resume_test.bin`
+**Terminal 1:** `cd /tmp && ~/FluxDrop/build/fluxdrop resume_test.bin`
 
 **Terminal 2:**
 
 ```bash
-cd /tmp/fluxdrop_resume
-./path/to/fluxdrop connect <ip> <port>
-# Authenticate. It should detect the .fluxpart file:
+mkdir -p /tmp/recv_resume && cd /tmp/recv_resume
+~/FluxDrop/build/fluxdrop connect <ip> <port>
+# Authenticate, accept the file, then press Ctrl+C midway
 ```
 
-**Expected:**
+Verify partial file exists:
+
+```bash
+ls /tmp/recv_resume/
+# resume_test.bin.fluxpart   ← partial download
+```
+
+**Step 2 — Resume:**
+
+**Terminal 1:** `cd /tmp && ~/FluxDrop/build/fluxdrop resume_test.bin` (restart sender)
+
+**Terminal 2:**
+
+```bash
+cd /tmp/recv_resume
+~/FluxDrop/build/fluxdrop connect <ip> <port>
+# Authenticate
+```
+
+**✅ Pass if:** It detects the partial file and resumes:
 ```
 Found partial download. XX.XMB out of 200.0MB downloaded.
 Accept? (y/n) y
 Resuming file transfer from offset...
 ```
 
-**Verify:**
+After completion, verify:
 
 ```bash
-md5sum /tmp/resume_test.bin /tmp/fluxdrop_resume/resume_test.bin
-# Hashes should match
+md5sum /tmp/resume_test.bin /tmp/recv_resume/resume_test.bin
+# Both hashes should match
 ```
 
 ---
 
 ### Test 10: Disk Space Check
 
-Tests that files are auto-rejected when there isn't enough space.
-
-To test this without filling your disk, you can use a tmpfs (RAM-based filesystem):
+Tests auto-rejection when disk space is insufficient.
 
 ```bash
-# Create a 1MB tmpfs mount
+# Create a tiny 1MB filesystem
 sudo mkdir -p /tmp/tinydisk
 sudo mount -t tmpfs -o size=1m tmpfs /tmp/tinydisk
 cd /tmp/tinydisk
 
-# Now try receiving a 10MB file - should be auto-rejected
-./path/to/fluxdrop connect <ip> <port>
+# Try to receive a large file (sender must be running with a >1MB file)
+~/FluxDrop/build/fluxdrop connect <ip> <port>
 ```
 
-**Expected:**
+**✅ Pass if:**
 ```
-Incoming file: large_test.bin (10.0MB)
-Error: Insufficient disk space! Requires 10.0MB but only 1.0MB available.
+Incoming file: large_test.bin (100.0MB)
+Error: Insufficient disk space! Requires 100.0MB but only 1.0MB available.
 Rejecting file automatically.
 ```
 
 **Cleanup:**
-
 ```bash
 sudo umount /tmp/tinydisk
 ```
@@ -522,35 +508,28 @@ sudo umount /tmp/tinydisk
 
 ### Test 11: Invalid Path Handling
 
-Tests that the sender handles bad file paths gracefully.
+Tests that the sender handles nonexistent files gracefully.
 
 ```bash
-./path/to/fluxdrop /tmp/nonexistent_file.txt
+~/FluxDrop/build/fluxdrop /tmp/nonexistent_file.txt
 ```
 
-**Expected:**
+**✅ Pass if:**
 ```
 Skipping invalid path: /tmp/nonexistent_file.txt
 Total files to transfer: 0
 ```
 
-If all paths are invalid, the sender creates a dummy job for backwards compatibility.
-
 ---
 
 ### Test 12: Two-Machine LAN Transfer
 
-The ultimate integration test — transfer between two separate machines.
-
-**Prerequisites:**
-- Both machines are on the same local network (WiFi or Ethernet)
-- FluxDrop is built on both machines
-- UDP broadcast port `45454` is not blocked by firewall
+Full integration test between two physical machines on the same network.
 
 **Machine A (Sender):**
 
 ```bash
-./fluxdrop important_document.pdf
+~/FluxDrop/build/fluxdrop important_document.pdf
 # Note the IP, port, and PIN
 ```
 
@@ -558,19 +537,21 @@ The ultimate integration test — transfer between two separate machines.
 
 ```bash
 # Option 1: Auto-discovery
-./fluxdrop join 482913
+~/FluxDrop/build/fluxdrop join 482913
 
 # Option 2: Direct connect
-./fluxdrop connect <Machine-A-IP> <port>
+~/FluxDrop/build/fluxdrop connect <Machine-A-IP> <port>
 ```
 
-**Firewall troubleshooting (if auto-discovery fails):**
+**If auto-discovery doesn't work**, open firewall ports:
 
 ```bash
-# Allow UDP broadcast on port 45454
-sudo ufw allow 45454/udp
+# Fedora (firewalld)
+sudo firewall-cmd --add-port=45454/udp
+sudo firewall-cmd --add-port=<port>/tcp
 
-# Allow the TCP port shown by the sender
+# Ubuntu (ufw)
+sudo ufw allow 45454/udp
 sudo ufw allow <port>/tcp
 ```
 
@@ -578,12 +559,12 @@ sudo ufw allow <port>/tcp
 
 ## Quick Reference
 
-| Action                    | Command                                  |
-| ------------------------- | ---------------------------------------- |
-| Send file(s)              | `./fluxdrop file1.txt file2.txt`         |
-| Send directory            | `./fluxdrop my_folder/`                  |
-| Receive (auto-discovery)  | `./fluxdrop join 482913`                 |
-| Receive (direct connect)  | `./fluxdrop connect 192.168.1.5 34567`   |
+| Action                    | Command                                                  |
+| ------------------------- | -------------------------------------------------------- |
+| Send file(s)              | `~/FluxDrop/build/fluxdrop file1.txt file2.txt`          |
+| Send directory            | `~/FluxDrop/build/fluxdrop my_folder/`                   |
+| Receive (auto-discovery)  | `~/FluxDrop/build/fluxdrop join 482913`                  |
+| Receive (direct connect)  | `~/FluxDrop/build/fluxdrop connect 192.168.1.5 34567`    |
 
 ## Troubleshooting
 
@@ -591,13 +572,11 @@ sudo ufw allow <port>/tcp
 | ------------------------------- | ------------------------------------------------------------ |
 | `join` hangs forever            | Ensure both machines are on the same subnet; check firewall allows UDP 45454 |
 | Connection refused              | Verify sender is running; check TCP port isn't blocked       |
-| `libsodium initialization failed` | Reinstall: `sudo apt install libsodium-dev`, rebuild        |
-| Build fails on nlohmann/json    | Install: `sudo apt install nlohmann-json3-dev`               |
+| `libsodium initialization failed` | Reinstall libsodium-devel, rebuild                        |
+| Build fails on nlohmann/json    | Install `json-devel` (Fedora) or `nlohmann-json3-dev` (Ubuntu) |
 | Wrong PIN repeatedly            | Restart the sender to generate a new PIN                     |
 | Files land in wrong directory   | `cd` to the desired download directory before running client |
 | `.fluxpart` file left behind    | Partial download from interrupted transfer; resume or delete |
 | `Skipping invalid path`        | Check that the file/directory path exists and is accessible  |
 | Transfer speed is slow          | Both machines should ideally be on wired Ethernet; WiFi adds overhead |
-
----
 
