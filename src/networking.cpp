@@ -1,4 +1,5 @@
 #include "networking.hpp"
+#include "transfer.hpp"
 #include <iostream>
 #include <boost/asio.hpp>
 
@@ -26,9 +27,10 @@ void Server::start() {
         
         std::cout << "Listening on " << ip << ":" << port << std::endl;
         
-        // Block to keep it running to demonstrate listening
         tcp::socket socket(io_context);
         acceptor.accept(socket);
+        
+        transfer::MessageSender::send(socket, "Hello from server");
     } catch (std::exception& e) {
         std::cerr << "Server Exception: " << e.what() << "\n";
     }
@@ -42,6 +44,9 @@ void Client::connect(const std::string& ip, unsigned short port) {
         boost::asio::connect(socket, resolver.resolve(ip, std::to_string(port)));
         
         std::cout << "Connected to peer\n";
+        
+        std::string response = transfer::MessageReceiver::receive(socket);
+        std::cout << "Received: " << response << std::endl;
     } catch (std::exception& e) {
         std::cerr << "Client Exception: " << e.what() << "\n";
     }

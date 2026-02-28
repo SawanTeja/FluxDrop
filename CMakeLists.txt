@@ -10,6 +10,6 @@ include_directories(include)
 find_package(Boost REQUIRED)
 find_package(Threads REQUIRED)
 
-add_executable(fluxdrop src/main.cpp src/networking.cpp)
+add_executable(fluxdrop src/main.cpp src/networking.cpp src/transfer.cpp)
 target_include_directories(fluxdrop PRIVATE ${Boost_INCLUDE_DIRS})
 target_link_libraries(fluxdrop PRIVATE Threads::Threads)
