@@ -5,6 +5,8 @@
 #include <map>
 #include <mutex>
 #include <string>
+#include <memory>
+#include <future>
 
 namespace ui {
 
@@ -33,6 +35,9 @@ private:
     std::map<std::string, networking::DiscoveredDevice> devices_;
     std::mutex devices_mutex_;
     std::atomic<bool> transferring_{false};
+    std::shared_ptr<std::atomic<bool>> cancel_flag_;
+
+    GtkWidget* cancel_button_;
 
     void on_device_found(const networking::DiscoveredDevice& device);
     void connect_to_device(const networking::DiscoveredDevice& device);

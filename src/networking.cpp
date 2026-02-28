@@ -640,17 +640,65 @@ void Client::connect_gui(const std::string& ip, unsigned short port,
 
                 if (callbacks.on_status) callbacks.on_status("Receiving: " + meta.filename + " (" + format_size(meta.size) + ")");
 
-                // Auto-accept
-                protocol::PacketHeader accept{static_cast<uint32_t>(protocol::CommandType::PONG), 0, header.session_id, 0};
-                transfer::MessageSender::send_header(socket, accept);
+                // Perform Disk Space Check
+                uint64_t available_space = 0;
+#ifdef _WIN32
+                ULARGE_INTEGER free_bytes;
+                if (GetDiskFreeSpaceExA(".", &free_bytes, nullptr, nullptr)) {
+                    available_space = free_bytes.QuadPart;
+                }
+#else
+                struct statvfs disk_stat;
+                if (statvfs(".", &disk_stat) == 0) {
+                    available_space = static_cast<uint64_t>(disk_stat.f_bavail) * disk_stat.f_frsize;
+                }
+#endif
+                if (available_space > 0 && available_space < meta.size) {
+                    if (callbacks.on_error) callbacks.on_error("Insufficient disk space. Requires " + format_size(meta.size) + " but only " + format_size(available_space) + " available.");
+                    protocol::PacketHeader reject_header{static_cast<uint32_t>(protocol::CommandType::CANCEL), 0, header.session_id, 0};
+                    transfer::MessageSender::send_header(socket, reject_header);
+                    continue; // Skip to next file
+                }
+
+                bool acc = true;
+                if (callbacks.on_file_request) {
+                    acc = callbacks.on_file_request(meta.filename, meta.size);
+                }
+
+                if (!acc) {
+                    protocol::PacketHeader reject_header{static_cast<uint32_t>(protocol::CommandType::CANCEL), 0, header.session_id, 0};
+                    transfer::MessageSender::send_header(socket, reject_header);
+                    if (callbacks.on_status) callbacks.on_status("Skipped: " + meta.filename);
+                    continue; // Skip to next file
+                }
 
                 std::string save_path = save_dir.empty() ? meta.filename : (save_dir + "/" + meta.filename);
 
+                uint64_t resume_offset = 0;
+                std::string part_file = save_path + ".fluxpart";
+                std::error_code ec;
+                auto part_size = std::filesystem::file_size(part_file, ec);
+                if (!ec) {
+                    resume_offset = part_size;
+                    if (callbacks.on_status) callbacks.on_status("Resuming from " + format_size(resume_offset));
+                }
+
+                if (resume_offset > 0) {
+                    protocol::PacketHeader resume_header{static_cast<uint32_t>(protocol::CommandType::RESUME), static_cast<uint32_t>(resume_offset), header.session_id, 0};
+                    transfer::MessageSender::send_header(socket, resume_header);
+                } else {
+                    protocol::PacketHeader accept{static_cast<uint32_t>(protocol::CommandType::PONG), 0, header.session_id, 0};
+                    transfer::MessageSender::send_header(socket, accept);
+                }
+
                 transfer::TransferState state = transfer::MessageReceiver::receive_file(
-                    socket, save_path, meta.size, 0, callbacks.on_progress);
+                    socket, save_path, meta.size, resume_offset, callbacks.on_progress, callbacks.cancel_flag);
 
                 if (state == transfer::TransferState::COMPLETED) {
                     if (callbacks.on_status) callbacks.on_status("Received: " + meta.filename);
+                } else if (state == transfer::TransferState::CANCELLED) {
+                     if (callbacks.on_status) callbacks.on_status("Cancelled: " + meta.filename);
+                     break; // if cancelled during transfer, the session is usually stopped
                 } else if (state == transfer::TransferState::FAILED) {
                     if (callbacks.on_error) callbacks.on_error("Failed to receive: " + meta.filename);
                     break;

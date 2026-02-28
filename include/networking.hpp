@@ -41,6 +41,8 @@ struct ClientCallbacks {
     ProgressCallback on_progress;
     std::function<void()> on_complete;
     std::function<void(const std::string&)> on_error;
+    std::function<bool(const std::string&, uint64_t)> on_file_request;
+    std::atomic<bool>* cancel_flag = nullptr;
 };
 
 class DiscoveryListener {

@@ -5,6 +5,7 @@
 #include <boost/asio.hpp>
 #include "protocol/packet.hpp"
 #include "protocol/file_meta.hpp"
+#include <atomic>
 
 namespace transfer {
 
@@ -34,7 +35,8 @@ public:
     static protocol::FileInfo receive_file_meta(boost::asio::ip::tcp::socket& socket, uint32_t payload_size);
     static TransferState receive_file(boost::asio::ip::tcp::socket& socket, const std::string& filepath,
                                       uint64_t expected_size, uint64_t start_offset = 0,
-                                      TransferProgressCallback progress_cb = nullptr);
+                                      TransferProgressCallback progress_cb = nullptr,
+                                      std::atomic<bool>* cancel_flag = nullptr);
 };
 
 } // namespace transfer

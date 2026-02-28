@@ -135,7 +135,7 @@ bool MessageSender::send_file(boost::asio::ip::tcp::socket& socket, const std::s
     }
 }
 
-TransferState MessageReceiver::receive_file(boost::asio::ip::tcp::socket& socket, const std::string& filepath, uint64_t expected_size, uint64_t start_offset, TransferProgressCallback progress_cb) {
+TransferState MessageReceiver::receive_file(boost::asio::ip::tcp::socket& socket, const std::string& filepath, uint64_t expected_size, uint64_t start_offset, TransferProgressCallback progress_cb, std::atomic<bool>* cancel_flag) {
     try {
         std::string part_file = filepath + ".fluxpart";
         
@@ -162,6 +162,15 @@ TransferState MessageReceiver::receive_file(boost::asio::ip::tcp::socket& socket
         auto last_print_time = start_time;
 
         while (total_received < expected_size) {
+            if (cancel_flag && cancel_flag->load()) {
+                std::cout << "\nTransfer cancelled locally.\n";
+                file.close();
+                // Send CANCEL to the sender
+                protocol::PacketHeader cancel_header{static_cast<uint32_t>(protocol::CommandType::CANCEL), 0, 0, 0};
+                MessageSender::send_header(socket, cancel_header);
+                return TransferState::CANCELLED;
+            }
+
             protocol::PacketHeader header = receive_header(socket);
             
             if (header.command == static_cast<uint32_t>(protocol::CommandType::FILE_CHUNK)) {
