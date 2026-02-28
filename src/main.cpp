@@ -2,7 +2,10 @@
 #include <string>
 #include <cstdint>
 #include <queue>
+#include <filesystem>
 #include "networking.hpp"
+
+namespace fs = std::filesystem;
 
 int main(int argc, char* argv[]) {
     if (argc >= 4 && std::string(argv[1]) == "connect") {
@@ -21,9 +24,25 @@ int main(int argc, char* argv[]) {
         
         for (int i = 1; i < argc; ++i) {
             std::string arg = argv[i];
-            size_t slash = arg.find_last_of("/\\");
-            std::string filename = (slash == std::string::npos) ? arg : arg.substr(slash + 1);
-            jobs.push({arg, filename, room_id});
+            fs::path path(arg);
+            
+            if (fs::is_directory(path)) {
+                // Recursively walk the directory
+                std::string base_dir = path.filename().string(); // Top-level dir name
+                for (const auto& entry : fs::recursive_directory_iterator(path)) {
+                    if (entry.is_regular_file()) {
+                        // Preserve relative path under the base directory name
+                        fs::path relative = base_dir / fs::relative(entry.path(), path);
+                        jobs.push({entry.path().string(), relative.string(), room_id});
+                    }
+                }
+                std::cout << "Queued directory: " << path.string() << " (" << jobs.size() << " files)\n";
+            } else if (fs::is_regular_file(path)) {
+                std::string filename = path.filename().string();
+                jobs.push({arg, filename, room_id});
+            } else {
+                std::cerr << "Skipping invalid path: " << arg << "\n";
+            }
         }
         
         // If no files were provided, create a dummy job for backwards compatibility testing
@@ -31,6 +50,7 @@ int main(int argc, char* argv[]) {
             jobs.push({"movie.mkv", "movie.mkv", room_id});
         }
 
+        std::cout << "Total files to transfer: " << jobs.size() << "\n";
         networking::Server server;
         server.start(jobs);
     }

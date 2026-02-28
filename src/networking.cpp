@@ -1,5 +1,6 @@
 #include "networking.hpp"
 #include "transfer.hpp"
+#include "security.hpp"
 #include "protocol/packet.hpp"
 #include "protocol/file_meta.hpp"
 #include <iostream>
@@ -52,7 +53,15 @@ void Server::start(std::queue<TransferJob> jobs) {
         std::string ip = get_local_ip(io_context);
         unsigned short port = acceptor.local_endpoint().port();
         
+        // Generate and display PIN
+        uint16_t pin = security::generate_pin();
+        std::string pin_str = std::to_string(pin);
+        std::string pin_hash = security::hash_pin(pin_str);
+        
         std::cout << "Listening on " << ip << ":" << port << std::endl;
+        std::cout << "┌──────────────────────┐\n";
+        std::cout << "│  Room PIN: " << pin_str << "       │\n";
+        std::cout << "└──────────────────────┘\n";
         
         // --- UDP Broadcast Thread ---
         std::atomic<bool> running{true};
@@ -76,11 +85,34 @@ void Server::start(std::queue<TransferJob> jobs) {
         tcp::socket socket(io_context);
         acceptor.accept(socket);
         
-        std::cout << "Client connected.\n";
-        running = false; // Stop broadcasting once a client connects
+        std::cout << "Client connected. Awaiting PIN authentication...\n";
+        running = false;
         if (broadcast_thread.joinable()) {
             broadcast_thread.join();
         }
+        
+        // --- PIN Authentication ---
+        protocol::PacketHeader auth_header = transfer::MessageReceiver::receive_header(socket);
+        if (auth_header.command != static_cast<uint32_t>(protocol::CommandType::AUTH)) {
+            std::cerr << "Expected AUTH packet, got command: " << auth_header.command << "\n";
+            return;
+        }
+        
+        // Read the hashed PIN payload
+        std::vector<char> auth_buf(auth_header.payload_size);
+        boost::asio::read(socket, boost::asio::buffer(auth_buf));
+        std::string received_hash(auth_buf.begin(), auth_buf.end());
+        
+        if (received_hash != pin_hash) {
+            std::cout << "Authentication FAILED. Wrong PIN.\n";
+            protocol::PacketHeader fail_header{static_cast<uint32_t>(protocol::CommandType::AUTH_FAIL), 0, session_id, 0};
+            transfer::MessageSender::send_header(socket, fail_header);
+            return;
+        }
+        
+        std::cout << "Authentication successful!\n";
+        protocol::PacketHeader ok_header{static_cast<uint32_t>(protocol::CommandType::AUTH_OK), 0, session_id, 0};
+        transfer::MessageSender::send_header(socket, ok_header);
 
         while (!jobs.empty()) {
             TransferJob job = jobs.front();
@@ -174,7 +206,34 @@ void Client::connect(const std::string& ip, unsigned short port) {
         tcp::socket socket(io_context);
         tcp::resolver resolver(io_context);
         boost::asio::connect(socket, resolver.resolve(ip, std::to_string(port)));
-        std::cout << "Connected to peer! Waiting for file streams...\n";
+        std::cout << "Connected to peer!\n";
+        
+        // --- PIN Authentication ---
+        std::cout << "Enter room PIN: ";
+        std::string pin_input;
+        std::getline(std::cin, pin_input);
+        
+        std::string hashed_pin = security::hash_pin(pin_input);
+        
+        // Send AUTH packet with hashed PIN as payload
+        protocol::PacketHeader auth_header{
+            static_cast<uint32_t>(protocol::CommandType::AUTH),
+            static_cast<uint32_t>(hashed_pin.size()),
+            0, 0
+        };
+        transfer::MessageSender::send_header(socket, auth_header);
+        boost::asio::write(socket, boost::asio::buffer(hashed_pin));
+        
+        // Wait for AUTH response
+        protocol::PacketHeader auth_response = transfer::MessageReceiver::receive_header(socket);
+        if (auth_response.command == static_cast<uint32_t>(protocol::CommandType::AUTH_FAIL)) {
+            std::cout << "Authentication failed. Wrong PIN.\n";
+            return;
+        } else if (auth_response.command != static_cast<uint32_t>(protocol::CommandType::AUTH_OK)) {
+            std::cout << "Unexpected response during authentication.\n";
+            return;
+        }
+        std::cout << "Authenticated! Waiting for file streams...\n";
         
         while (true) {
             protocol::PacketHeader header = transfer::MessageReceiver::receive_header(socket);

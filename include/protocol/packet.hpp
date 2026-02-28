@@ -11,7 +11,10 @@ enum class CommandType : uint32_t {
     CANCEL = 3,
     PING = 4,
     PONG = 5,
-    RESUME = 6
+    RESUME = 6,
+    AUTH = 7,
+    AUTH_OK = 8,
+    AUTH_FAIL = 9
 };
 
 // Fixed 16-byte header

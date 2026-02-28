@@ -2,6 +2,7 @@
 #include <iostream>
 #include <vector>
 #include <fstream>
+#include <filesystem>
 
 namespace transfer {
 
@@ -116,6 +117,12 @@ bool MessageSender::send_file(boost::asio::ip::tcp::socket& socket, const std::s
 TransferState MessageReceiver::receive_file(boost::asio::ip::tcp::socket& socket, const std::string& filepath, uint64_t expected_size, uint64_t start_offset) {
     try {
         std::string part_file = filepath + ".fluxpart";
+        
+        // Ensure parent directories exist for nested file paths
+        std::filesystem::path parent = std::filesystem::path(part_file).parent_path();
+        if (!parent.empty()) {
+            std::filesystem::create_directories(parent);
+        }
         
         // Open in append mode if we have a start_offset
         std::ios_base::openmode mode = std::ios::binary;
