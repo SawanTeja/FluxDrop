@@ -4,10 +4,17 @@
 #include <queue>
 #include <filesystem>
 #include "networking.hpp"
+#include "ui/main_window.hpp"
 
 namespace fs = std::filesystem;
 
 int main(int argc, char* argv[]) {
+    // No arguments → launch GUI
+    if (argc == 1) {
+        return ui::run_gui(argc, argv);
+    }
+
+    // CLI mode (existing behavior)
     if (argc >= 4 && std::string(argv[1]) == "connect") {
         std::string ip = argv[2];
         unsigned short port = std::stoi(argv[3]);

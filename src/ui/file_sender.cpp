@@ -1,0 +1,427 @@
+#include "ui/file_sender.hpp"
+#include "ui/transfer_dialog.hpp"
+#include "transfer.hpp"
+#include "security.hpp"
+#include "protocol/packet.hpp"
+#include "protocol/file_meta.hpp"
+#include <iostream>
+#include <filesystem>
+#include <sys/stat.h>
+
+namespace fs = std::filesystem;
+
+namespace ui {
+
+// ─── Idle callback data structs ─────────────────────────────────────────────
+
+struct StatusUpdateData {
+    GtkWidget* label;
+    std::string text;
+};
+
+struct ProgressUpdateData {
+    GtkWidget* progress_bar;
+    GtkWidget* progress_label;
+    double fraction;
+    std::string text;
+};
+
+struct PinUpdateData {
+    GtkWidget* pin_label;
+    GtkWidget* status_label;
+    std::string pin_text;
+    std::string status_text;
+};
+
+struct TransferCompleteData {
+    GtkWidget* status_label;
+    GtkWidget* progress_bar;
+    GtkWidget* progress_label;
+    GtkWidget* send_button;
+    std::string message;
+};
+
+// ─── Idle callbacks (run on main thread) ────────────────────────────────────
+
+static gboolean update_status_idle(gpointer data) {
+    auto* d = static_cast<StatusUpdateData*>(data);
+    if (GTK_IS_LABEL(d->label))
+        gtk_label_set_text(GTK_LABEL(d->label), d->text.c_str());
+    delete d;
+    return G_SOURCE_REMOVE;
+}
+
+static gboolean update_progress_idle(gpointer data) {
+    auto* d = static_cast<ProgressUpdateData*>(data);
+    if (GTK_IS_PROGRESS_BAR(d->progress_bar))
+        gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(d->progress_bar), d->fraction);
+    if (GTK_IS_LABEL(d->progress_label))
+        gtk_label_set_text(GTK_LABEL(d->progress_label), d->text.c_str());
+    delete d;
+    return G_SOURCE_REMOVE;
+}
+
+static gboolean update_pin_idle(gpointer data) {
+    auto* d = static_cast<PinUpdateData*>(data);
+    if (GTK_IS_LABEL(d->pin_label))
+        gtk_label_set_text(GTK_LABEL(d->pin_label), d->pin_text.c_str());
+    if (GTK_IS_LABEL(d->status_label))
+        gtk_label_set_text(GTK_LABEL(d->status_label), d->status_text.c_str());
+    delete d;
+    return G_SOURCE_REMOVE;
+}
+
+static gboolean transfer_complete_idle(gpointer data) {
+    auto* d = static_cast<TransferCompleteData*>(data);
+    if (GTK_IS_LABEL(d->status_label))
+        gtk_label_set_text(GTK_LABEL(d->status_label), d->message.c_str());
+    if (GTK_IS_PROGRESS_BAR(d->progress_bar))
+        gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(d->progress_bar), 1.0);
+    if (GTK_IS_LABEL(d->progress_label))
+        gtk_label_set_text(GTK_LABEL(d->progress_label), "Done");
+    if (GTK_IS_WIDGET(d->send_button))
+        gtk_widget_set_sensitive(d->send_button, TRUE);
+    delete d;
+    return G_SOURCE_REMOVE;
+}
+
+// ─── FileSenderPanel ────────────────────────────────────────────────────────
+
+FileSenderPanel::FileSenderPanel(GtkWindow* parent_window)
+    : parent_window_(parent_window) {
+
+    panel_ = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_set_margin_start(panel_, 12);
+    gtk_widget_set_margin_end(panel_, 12);
+    gtk_widget_set_margin_top(panel_, 12);
+    gtk_widget_set_margin_bottom(panel_, 12);
+
+    // ─── Drop zone ──────────────────────────────────────────────────────
+    drop_area_ = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_add_css_class(drop_area_, "drop-zone");
+    gtk_widget_set_vexpand(drop_area_, FALSE);
+
+    drop_label_ = gtk_label_new("🗂️  Drag & Drop Files Here");
+    gtk_widget_add_css_class(drop_label_, "title-text");
+    gtk_box_append(GTK_BOX(drop_area_), drop_label_);
+
+    GtkWidget* sub_label = gtk_label_new("or use the buttons below");
+    gtk_widget_add_css_class(sub_label, "subtitle-text");
+    gtk_box_append(GTK_BOX(drop_area_), sub_label);
+
+    gtk_box_append(GTK_BOX(panel_), drop_area_);
+
+    // ─── Drag & drop target ─────────────────────────────────────────────
+    GtkDropTarget* drop_target = gtk_drop_target_new(GDK_TYPE_FILE_LIST, GDK_ACTION_COPY);
+    g_signal_connect(drop_target, "drop", G_CALLBACK(on_drop), this);
+    gtk_widget_add_controller(drop_area_, GTK_EVENT_CONTROLLER(drop_target));
+
+    // ─── Buttons row ────────────────────────────────────────────────────
+    GtkWidget* btn_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_widget_set_halign(btn_box, GTK_ALIGN_CENTER);
+    gtk_widget_set_margin_top(btn_box, 4);
+
+    choose_file_button_ = gtk_button_new_with_label("📄 Choose Files");
+    gtk_widget_add_css_class(choose_file_button_, "suggested-action");
+    g_signal_connect(choose_file_button_, "clicked", G_CALLBACK(on_choose_file), this);
+    gtk_box_append(GTK_BOX(btn_box), choose_file_button_);
+
+    choose_folder_button_ = gtk_button_new_with_label("📁 Choose Folder");
+    gtk_widget_add_css_class(choose_folder_button_, "suggested-action");
+    g_signal_connect(choose_folder_button_, "clicked", G_CALLBACK(on_choose_folder), this);
+    gtk_box_append(GTK_BOX(btn_box), choose_folder_button_);
+
+    gtk_box_append(GTK_BOX(panel_), btn_box);
+
+    // ─── File list ──────────────────────────────────────────────────────
+    GtkWidget* scroll = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scroll), 120);
+    gtk_widget_set_vexpand(scroll, TRUE);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
+                                   GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+
+    file_list_box_ = gtk_list_box_new();
+    gtk_list_box_set_selection_mode(GTK_LIST_BOX(file_list_box_), GTK_SELECTION_NONE);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), file_list_box_);
+    gtk_box_append(GTK_BOX(panel_), scroll);
+
+    // ─── Action row ─────────────────────────────────────────────────────
+    GtkWidget* action_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_widget_set_halign(action_box, GTK_ALIGN_CENTER);
+    gtk_widget_set_margin_top(action_box, 4);
+
+    send_button_ = gtk_button_new_with_label("🚀 Start Sharing");
+    gtk_widget_add_css_class(send_button_, "suggested-action");
+    gtk_widget_set_sensitive(send_button_, FALSE);
+    g_signal_connect(send_button_, "clicked", G_CALLBACK(on_send_clicked), this);
+    gtk_box_append(GTK_BOX(action_box), send_button_);
+
+    clear_button_ = gtk_button_new_with_label("🗑️ Clear");
+    gtk_widget_add_css_class(clear_button_, "destructive-action");
+    g_signal_connect(clear_button_, "clicked", G_CALLBACK(on_clear_clicked), this);
+    gtk_box_append(GTK_BOX(action_box), clear_button_);
+
+    gtk_box_append(GTK_BOX(panel_), action_box);
+
+    // ─── PIN display ────────────────────────────────────────────────────
+    pin_label_ = gtk_label_new("");
+    gtk_widget_add_css_class(pin_label_, "pin-display");
+    gtk_widget_set_visible(pin_label_, FALSE);
+    gtk_box_append(GTK_BOX(panel_), pin_label_);
+
+    // ─── Status / Progress ──────────────────────────────────────────────
+    status_label_ = gtk_label_new("");
+    gtk_widget_add_css_class(status_label_, "status-text");
+    gtk_box_append(GTK_BOX(panel_), status_label_);
+
+    progress_bar_ = gtk_progress_bar_new();
+    gtk_widget_set_visible(progress_bar_, FALSE);
+    gtk_box_append(GTK_BOX(panel_), progress_bar_);
+
+    progress_label_ = gtk_label_new("");
+    gtk_widget_add_css_class(progress_label_, "status-text");
+    gtk_box_append(GTK_BOX(panel_), progress_label_);
+}
+
+FileSenderPanel::~FileSenderPanel() {
+    server_running_ = false;
+    if (server_thread_.joinable()) {
+        server_thread_.detach();
+    }
+}
+
+void FileSenderPanel::add_path(const std::string& path) {
+    fs::path p(path);
+    if (fs::is_directory(p)) {
+        for (const auto& entry : fs::recursive_directory_iterator(p)) {
+            if (entry.is_regular_file()) {
+                queued_files_.push_back(entry.path().string());
+            }
+        }
+    } else if (fs::is_regular_file(p)) {
+        queued_files_.push_back(path);
+    }
+    update_file_list_ui();
+}
+
+void FileSenderPanel::clear_files() {
+    queued_files_.clear();
+    update_file_list_ui();
+}
+
+void FileSenderPanel::update_file_list_ui() {
+    // Clear existing rows
+    GtkWidget* child;
+    while ((child = gtk_widget_get_first_child(file_list_box_)) != nullptr) {
+        gtk_list_box_remove(GTK_LIST_BOX(file_list_box_), child);
+    }
+
+    for (const auto& file : queued_files_) {
+        fs::path p(file);
+        std::string display = "📄 " + p.filename().string();
+
+        // Get file size
+        struct stat st;
+        if (stat(file.c_str(), &st) == 0) {
+            double size = st.st_size;
+            const char* units[] = {"B", "KB", "MB", "GB"};
+            int i = 0;
+            while (size >= 1024 && i < 3) { size /= 1024; i++; }
+            char buf[64];
+            snprintf(buf, sizeof(buf), " (%.1f %s)", size, units[i]);
+            display += buf;
+        }
+
+        GtkWidget* label = gtk_label_new(display.c_str());
+        gtk_label_set_xalign(GTK_LABEL(label), 0.0);
+        gtk_widget_add_css_class(label, "file-item");
+        gtk_list_box_append(GTK_LIST_BOX(file_list_box_), label);
+    }
+
+    gtk_widget_set_sensitive(send_button_, !queued_files_.empty() && !server_running_);
+}
+
+void FileSenderPanel::start_server() {
+    if (queued_files_.empty() || server_running_) return;
+
+    server_running_ = true;
+    gtk_widget_set_sensitive(send_button_, FALSE);
+    gtk_widget_set_sensitive(choose_file_button_, FALSE);
+    gtk_widget_set_sensitive(choose_folder_button_, FALSE);
+    gtk_widget_set_sensitive(clear_button_, FALSE);
+    gtk_widget_set_visible(progress_bar_, TRUE);
+    gtk_widget_set_visible(pin_label_, TRUE);
+
+    // Build job queue
+    uint32_t session_id = 482913;
+    std::queue<networking::TransferJob> jobs;
+    for (const auto& filepath : queued_files_) {
+        fs::path p(filepath);
+        jobs.push({filepath, p.filename().string(), session_id});
+    }
+
+    // Capture widget pointers for callbacks
+    GtkWidget* pin_lbl = pin_label_;
+    GtkWidget* status_lbl = status_label_;
+    GtkWidget* progress_br = progress_bar_;
+    GtkWidget* progress_lbl = progress_label_;
+    GtkWidget* send_btn = send_button_;
+    GtkWidget* choose_file_btn = choose_file_button_;
+    GtkWidget* choose_folder_btn = choose_folder_button_;
+    GtkWidget* clear_btn = clear_button_;
+
+    networking::ServerCallbacks callbacks;
+    callbacks.on_ready = [pin_lbl, status_lbl](const std::string& ip, unsigned short port, uint16_t pin) {
+        auto* d = new PinUpdateData{
+            pin_lbl, status_lbl,
+            "PIN: " + std::to_string(pin),
+            "Listening on " + ip + ":" + std::to_string(port) + " — Waiting for receiver..."
+        };
+        g_idle_add(update_pin_idle, d);
+    };
+
+    callbacks.on_status = [status_lbl](const std::string& msg) {
+        g_idle_add(update_status_idle, new StatusUpdateData{status_lbl, msg});
+    };
+
+    callbacks.on_progress = [progress_br, progress_lbl](const std::string& filename, uint64_t transferred, uint64_t total, double speed) {
+        double frac = (total > 0) ? (static_cast<double>(transferred) / total) : 0.0;
+        int pct = static_cast<int>(frac * 100);
+        char buf[128];
+        snprintf(buf, sizeof(buf), "%d%% — %.1f MB/s — %s", pct, speed, filename.c_str());
+        g_idle_add(update_progress_idle, new ProgressUpdateData{progress_br, progress_lbl, frac, buf});
+    };
+
+    callbacks.on_complete = [status_lbl, progress_br, progress_lbl, send_btn]() {
+        g_idle_add(transfer_complete_idle, new TransferCompleteData{
+            status_lbl, progress_br, progress_lbl, send_btn,
+            "✅ All files transferred successfully!"
+        });
+    };
+
+    callbacks.on_error = [status_lbl, progress_br, progress_lbl, send_btn](const std::string& err) {
+        g_idle_add(transfer_complete_idle, new TransferCompleteData{
+            status_lbl, progress_br, progress_lbl, send_btn,
+            "❌ Error: " + err
+        });
+    };
+
+    // Server thread
+    auto* running_ptr = &server_running_;
+    server_thread_ = std::thread([jobs = std::move(jobs), callbacks, running_ptr,
+                                  choose_file_btn, choose_folder_btn, clear_btn]() mutable {
+        networking::Server server;
+        server.start_gui(std::move(jobs), callbacks);
+        *running_ptr = false;
+
+        // Re-enable buttons on completion
+        struct ReenableData { GtkWidget *a, *b, *c; };
+        g_idle_add(+[](gpointer data) -> gboolean {
+            auto* d = static_cast<ReenableData*>(data);
+            if (GTK_IS_WIDGET(d->a)) gtk_widget_set_sensitive(d->a, TRUE);
+            if (GTK_IS_WIDGET(d->b)) gtk_widget_set_sensitive(d->b, TRUE);
+            if (GTK_IS_WIDGET(d->c)) gtk_widget_set_sensitive(d->c, TRUE);
+            delete d;
+            return G_SOURCE_REMOVE;
+        }, new ReenableData{choose_file_btn, choose_folder_btn, clear_btn});
+    });
+    server_thread_.detach();
+}
+
+// ─── GTK Callbacks ──────────────────────────────────────────────────────────
+
+void FileSenderPanel::on_choose_file(GtkButton* /*button*/, gpointer user_data) {
+    auto* self = static_cast<FileSenderPanel*>(user_data);
+
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+    GtkFileChooserNative* native = gtk_file_chooser_native_new(
+        "Select Files", self->parent_window_,
+        GTK_FILE_CHOOSER_ACTION_OPEN, "_Open", "_Cancel");
+    gtk_file_chooser_set_select_multiple(GTK_FILE_CHOOSER(native), TRUE);
+
+    g_signal_connect(native, "response", G_CALLBACK(+[](GtkNativeDialog* dialog, int response, gpointer data) {
+        if (response == GTK_RESPONSE_ACCEPT) {
+            auto* panel = static_cast<FileSenderPanel*>(data);
+            GtkFileChooser* chooser = GTK_FILE_CHOOSER(dialog);
+            GListModel* files = gtk_file_chooser_get_files(chooser);
+            for (guint i = 0; i < g_list_model_get_n_items(files); i++) {
+                GFile* file = G_FILE(g_list_model_get_item(files, i));
+                char* path = g_file_get_path(file);
+                if (path) {
+                    panel->add_path(path);
+                    g_free(path);
+                }
+                g_object_unref(file);
+            }
+            g_object_unref(files);
+        }
+        g_object_unref(dialog);
+    }), self);
+
+    gtk_native_dialog_show(GTK_NATIVE_DIALOG(native));
+G_GNUC_END_IGNORE_DEPRECATIONS
+}
+
+void FileSenderPanel::on_choose_folder(GtkButton* /*button*/, gpointer user_data) {
+    auto* self = static_cast<FileSenderPanel*>(user_data);
+
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+    GtkFileChooserNative* native = gtk_file_chooser_native_new(
+        "Select Folder", self->parent_window_,
+        GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER, "_Open", "_Cancel");
+
+    g_signal_connect(native, "response", G_CALLBACK(+[](GtkNativeDialog* dialog, int response, gpointer data) {
+        if (response == GTK_RESPONSE_ACCEPT) {
+            auto* panel = static_cast<FileSenderPanel*>(data);
+            GFile* folder = gtk_file_chooser_get_file(GTK_FILE_CHOOSER(dialog));
+            if (folder) {
+                char* path = g_file_get_path(folder);
+                if (path) {
+                    panel->add_path(path);
+                    g_free(path);
+                }
+                g_object_unref(folder);
+            }
+        }
+        g_object_unref(dialog);
+    }), self);
+
+    gtk_native_dialog_show(GTK_NATIVE_DIALOG(native));
+G_GNUC_END_IGNORE_DEPRECATIONS
+}
+
+void FileSenderPanel::on_send_clicked(GtkButton* /*button*/, gpointer user_data) {
+    auto* self = static_cast<FileSenderPanel*>(user_data);
+    self->start_server();
+}
+
+void FileSenderPanel::on_clear_clicked(GtkButton* /*button*/, gpointer user_data) {
+    auto* self = static_cast<FileSenderPanel*>(user_data);
+    self->clear_files();
+    gtk_widget_set_visible(self->pin_label_, FALSE);
+    gtk_widget_set_visible(self->progress_bar_, FALSE);
+    gtk_label_set_text(GTK_LABEL(self->status_label_), "");
+    gtk_label_set_text(GTK_LABEL(self->progress_label_), "");
+}
+
+gboolean FileSenderPanel::on_drop(GtkDropTarget* /*target*/, const GValue* value,
+                                   double /*x*/, double /*y*/, gpointer user_data) {
+    auto* self = static_cast<FileSenderPanel*>(user_data);
+
+    if (G_VALUE_HOLDS(value, GDK_TYPE_FILE_LIST)) {
+        GdkFileList* file_list = static_cast<GdkFileList*>(g_value_get_boxed(value));
+        GSList* files = gdk_file_list_get_files(file_list);
+        for (GSList* l = files; l != nullptr; l = l->next) {
+            GFile* file = G_FILE(l->data);
+            char* path = g_file_get_path(file);
+            if (path) {
+                self->add_path(path);
+                g_free(path);
+            }
+        }
+        return TRUE;
+    }
+    return FALSE;
+}
+
+} // namespace ui

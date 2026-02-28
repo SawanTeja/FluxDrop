@@ -3,6 +3,8 @@
 #include <vector>
 #include <fstream>
 #include <filesystem>
+#include <chrono>
+#include <iomanip>
 
 namespace transfer {
 
@@ -84,7 +86,7 @@ protocol::FileInfo MessageReceiver::receive_file_meta(boost::asio::ip::tcp::sock
     return info;
 }
 
-bool MessageSender::send_file(boost::asio::ip::tcp::socket& socket, const std::string& filepath, uint32_t session_id, uint64_t start_offset) {
+bool MessageSender::send_file(boost::asio::ip::tcp::socket& socket, const std::string& filepath, uint32_t session_id, uint64_t start_offset, TransferProgressCallback progress_cb) {
     try {
         std::ifstream file(filepath, std::ios::binary);
         if (!file.is_open()) {
@@ -92,9 +94,14 @@ bool MessageSender::send_file(boost::asio::ip::tcp::socket& socket, const std::s
             return false;
         }
 
-        if (start_offset > 0) {
-            file.seekg(start_offset);
-        }
+        // Get file size
+        file.seekg(0, std::ios::end);
+        uint64_t file_size = file.tellg();
+        file.seekg(start_offset);
+
+        uint64_t total_sent = start_offset;
+        auto start_time = std::chrono::steady_clock::now();
+        auto last_cb_time = start_time;
 
         std::vector<char> buffer(64 * 1024); // 64KB per chunk
         while (file.read(buffer.data(), buffer.size()) || file.gcount() > 0) {
@@ -106,6 +113,20 @@ bool MessageSender::send_file(boost::asio::ip::tcp::socket& socket, const std::s
             };
             send_header(socket, header);
             boost::asio::write(socket, boost::asio::buffer(buffer.data(), bytes_read));
+            total_sent += bytes_read;
+
+            if (progress_cb) {
+                auto now = std::chrono::steady_clock::now();
+                auto elapsed_since_cb = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_cb_time).count();
+                if (elapsed_since_cb >= 300 || total_sent == file_size) {
+                    double elapsed = std::chrono::duration<double>(now - start_time).count();
+                    uint64_t session_sent = total_sent - start_offset;
+                    double speed = (elapsed > 0) ? (session_sent / elapsed / (1024.0 * 1024.0)) : 0;
+                    std::filesystem::path p(filepath);
+                    progress_cb(p.filename().string(), total_sent, file_size, speed);
+                    last_cb_time = now;
+                }
+            }
         }
         return true;
     } catch (std::exception& e) {
@@ -114,7 +135,7 @@ bool MessageSender::send_file(boost::asio::ip::tcp::socket& socket, const std::s
     }
 }
 
-TransferState MessageReceiver::receive_file(boost::asio::ip::tcp::socket& socket, const std::string& filepath, uint64_t expected_size, uint64_t start_offset) {
+TransferState MessageReceiver::receive_file(boost::asio::ip::tcp::socket& socket, const std::string& filepath, uint64_t expected_size, uint64_t start_offset, TransferProgressCallback progress_cb) {
     try {
         std::string part_file = filepath + ".fluxpart";
         
@@ -153,28 +174,27 @@ TransferState MessageReceiver::receive_file(boost::asio::ip::tcp::socket& socket
                 auto now = std::chrono::steady_clock::now();
                 auto elapsed_since_print = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_print_time).count();
                 
-                // Update terminal every ~500ms or on completion
-                if (elapsed_since_print >= 500 || total_received == expected_size) {
+                if (elapsed_since_print >= 300 || total_received == expected_size) {
                     double elapsed_seconds = std::chrono::duration<double>(now - start_time).count();
-                    
-                    // Note: speed and ETA only account for the *current* session transfer speed, ignoring the offset duration
                     uint64_t session_received = total_received - start_offset;
                     double speed_bps = (elapsed_seconds > 0) ? (session_received / elapsed_seconds) : 0;
                     double speed_mbps = speed_bps / (1024.0 * 1024.0);
                     
-                    int percent = (expected_size > 0) ? static_cast<int>((total_received * 100.0) / expected_size) : 100;
-                    
-                    uint64_t remaining_bytes = expected_size - total_received;
-                    double eta_seconds = (speed_bps > 0) ? (remaining_bytes / speed_bps) : 0;
-                    
-                    int eta_min = static_cast<int>(eta_seconds) / 60;
-                    int eta_sec = static_cast<int>(eta_seconds) % 60;
+                    if (progress_cb) {
+                        progress_cb(filepath, total_received, expected_size, speed_mbps);
+                    } else {
+                        // CLI mode: print to stdout
+                        int percent = (expected_size > 0) ? static_cast<int>((total_received * 100.0) / expected_size) : 100;
+                        uint64_t remaining_bytes = expected_size - total_received;
+                        double eta_seconds = (speed_bps > 0) ? (remaining_bytes / speed_bps) : 0;
+                        int eta_min = static_cast<int>(eta_seconds) / 60;
+                        int eta_sec = static_cast<int>(eta_seconds) % 60;
 
-                    std::cout << "\r" << percent << "% | " 
-                              << std::fixed << std::setprecision(1) << speed_mbps << " MB/s | "
-                              << "ETA " << std::setfill('0') << std::setw(2) << eta_min << ":"
-                              << std::setfill('0') << std::setw(2) << eta_sec << "    " << std::flush;
-                    
+                        std::cout << "\r" << percent << "% | " 
+                                  << std::fixed << std::setprecision(1) << speed_mbps << " MB/s | "
+                                  << "ETA " << std::setfill('0') << std::setw(2) << eta_min << ":"
+                                  << std::setfill('0') << std::setw(2) << eta_sec << "    " << std::flush;
+                    }
                     last_print_time = now;
                 }
 
@@ -188,8 +208,10 @@ TransferState MessageReceiver::receive_file(boost::asio::ip::tcp::socket& socket
                 MessageSender::send_header(socket, pong_header);
             }
         }
-        std::cout << "\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b" << std::flush; // clear line
-        std::cout << "\nFile transfer completed successfully.\n";
+        if (!progress_cb) {
+            std::cout << "\r                                                                 " << std::flush;
+            std::cout << "\nFile transfer completed successfully.\n";
+        }
         file.close();
         
         // Rename .fluxpart to final filename
