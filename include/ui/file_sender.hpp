@@ -2,6 +2,7 @@
 
 #include <gtk/gtk.h>
 #include "networking.hpp"
+#include <memory>
 #include <vector>
 #include <string>
 #include <thread>
@@ -34,16 +35,19 @@ private:
     std::vector<std::string> queued_files_;
     std::thread server_thread_;
     std::atomic<bool> server_running_{false};
+    std::shared_ptr<std::atomic<bool>> cancel_flag_;
 
     void add_path(const std::string& path);
     void clear_files();
     void start_server();
+    void cancel_server();
     void update_file_list_ui();
 
     static void on_choose_file(GtkButton* button, gpointer user_data);
     static void on_choose_folder(GtkButton* button, gpointer user_data);
     static void on_send_clicked(GtkButton* button, gpointer user_data);
     static void on_clear_clicked(GtkButton* button, gpointer user_data);
+    static void on_cancel_clicked(GtkButton* button, gpointer user_data);
     static gboolean on_drop(GtkDropTarget* target, const GValue* value,
                             double x, double y, gpointer user_data);
 };

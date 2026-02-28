@@ -33,6 +33,7 @@ struct ServerCallbacks {
     ProgressCallback on_progress;
     std::function<void()> on_complete;
     std::function<void(const std::string&)> on_error;
+    std::atomic<bool>* cancel_flag = nullptr;  // set to true to abort waiting
 };
 
 struct ClientCallbacks {

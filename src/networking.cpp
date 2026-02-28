@@ -426,13 +426,36 @@ void Server::start_gui(std::queue<TransferJob> jobs, ServerCallbacks callbacks) 
             } catch (...) {}
         });
 
-        // Wait for connection
+        // Wait for connection (cancellable)
         tcp::socket socket(io_context);
-        acceptor.accept(socket);
+        bool connected = false;
+        bool cancelled = false;
 
-        if (callbacks.on_status) callbacks.on_status("Client connected. Authenticating...");
+        acceptor.async_accept(socket, [&connected](const boost::system::error_code& ec) {
+            if (!ec) connected = true;
+        });
+
+        // Poll until connected or cancelled
+        while (!connected && !cancelled) {
+            io_context.poll();
+            io_context.restart();
+            if (callbacks.cancel_flag && callbacks.cancel_flag->load()) {
+                cancelled = true;
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
+
         broadcasting = false;
         if (broadcast_thread.joinable()) broadcast_thread.join();
+
+        if (cancelled) {
+            acceptor.close();
+            if (callbacks.on_status) callbacks.on_status("Sharing cancelled.");
+            return;
+        }
+
+        if (callbacks.on_status) callbacks.on_status("Client connected. Authenticating...");
 
         // PIN Authentication
         protocol::PacketHeader auth_header = transfer::MessageReceiver::receive_header(socket);

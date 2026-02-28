@@ -161,6 +161,15 @@ FileSenderPanel::FileSenderPanel(GtkWindow* parent_window)
     g_signal_connect(clear_button_, "clicked", G_CALLBACK(on_clear_clicked), this);
     gtk_box_append(GTK_BOX(action_box), clear_button_);
 
+    // Cancel button (hidden by default, shown when sharing)
+    GtkWidget* cancel_button = gtk_button_new_with_label("⏹ Cancel Sharing");
+    gtk_widget_add_css_class(cancel_button, "destructive-action");
+    gtk_widget_set_visible(cancel_button, FALSE);
+    g_signal_connect(cancel_button, "clicked", G_CALLBACK(on_cancel_clicked), this);
+    gtk_box_append(GTK_BOX(action_box), cancel_button);
+    // Store as data on send_button so we can toggle visibility
+    g_object_set_data(G_OBJECT(send_button_), "cancel-btn", cancel_button);
+
     gtk_box_append(GTK_BOX(panel_), action_box);
 
     // ─── PIN display ────────────────────────────────────────────────────
@@ -184,6 +193,7 @@ FileSenderPanel::FileSenderPanel(GtkWindow* parent_window)
 }
 
 FileSenderPanel::~FileSenderPanel() {
+    if (cancel_flag_) cancel_flag_->store(true);
     server_running_ = false;
     if (server_thread_.joinable()) {
         server_thread_.detach();
@@ -245,10 +255,16 @@ void FileSenderPanel::start_server() {
     if (queued_files_.empty() || server_running_) return;
 
     server_running_ = true;
-    gtk_widget_set_sensitive(send_button_, FALSE);
+    cancel_flag_ = std::make_shared<std::atomic<bool>>(false);
+
+    // Toggle button visibility
+    gtk_widget_set_visible(send_button_, FALSE);
+    gtk_widget_set_visible(clear_button_, FALSE);
+    GtkWidget* cancel_btn = static_cast<GtkWidget*>(g_object_get_data(G_OBJECT(send_button_), "cancel-btn"));
+    if (cancel_btn) gtk_widget_set_visible(cancel_btn, TRUE);
+
     gtk_widget_set_sensitive(choose_file_button_, FALSE);
     gtk_widget_set_sensitive(choose_folder_button_, FALSE);
-    gtk_widget_set_sensitive(clear_button_, FALSE);
     gtk_widget_set_visible(progress_bar_, TRUE);
     gtk_widget_set_visible(pin_label_, TRUE);
 
@@ -266,11 +282,13 @@ void FileSenderPanel::start_server() {
     GtkWidget* progress_br = progress_bar_;
     GtkWidget* progress_lbl = progress_label_;
     GtkWidget* send_btn = send_button_;
+    GtkWidget* clear_btn_widget = clear_button_;
     GtkWidget* choose_file_btn = choose_file_button_;
     GtkWidget* choose_folder_btn = choose_folder_button_;
-    GtkWidget* clear_btn = clear_button_;
 
     networking::ServerCallbacks callbacks;
+    callbacks.cancel_flag = cancel_flag_.get();
+
     callbacks.on_ready = [pin_lbl, status_lbl](const std::string& ip, unsigned short port, uint16_t pin) {
         auto* d = new PinUpdateData{
             pin_lbl, status_lbl,
@@ -309,23 +327,37 @@ void FileSenderPanel::start_server() {
     // Server thread
     auto* running_ptr = &server_running_;
     server_thread_ = std::thread([jobs = std::move(jobs), callbacks, running_ptr,
-                                  choose_file_btn, choose_folder_btn, clear_btn]() mutable {
+                                  send_btn, clear_btn_widget, cancel_btn,
+                                  choose_file_btn, choose_folder_btn]() mutable {
         networking::Server server;
         server.start_gui(std::move(jobs), callbacks);
         *running_ptr = false;
 
         // Re-enable buttons on completion
-        struct ReenableData { GtkWidget *a, *b, *c; };
+        struct ReenableData { GtkWidget *send, *clear, *cancel, *file, *folder; };
         g_idle_add(+[](gpointer data) -> gboolean {
             auto* d = static_cast<ReenableData*>(data);
-            if (GTK_IS_WIDGET(d->a)) gtk_widget_set_sensitive(d->a, TRUE);
-            if (GTK_IS_WIDGET(d->b)) gtk_widget_set_sensitive(d->b, TRUE);
-            if (GTK_IS_WIDGET(d->c)) gtk_widget_set_sensitive(d->c, TRUE);
+            if (GTK_IS_WIDGET(d->send)) { gtk_widget_set_visible(d->send, TRUE); gtk_widget_set_sensitive(d->send, TRUE); }
+            if (GTK_IS_WIDGET(d->clear)) gtk_widget_set_visible(d->clear, TRUE);
+            if (GTK_IS_WIDGET(d->cancel)) gtk_widget_set_visible(d->cancel, FALSE);
+            if (GTK_IS_WIDGET(d->file)) gtk_widget_set_sensitive(d->file, TRUE);
+            if (GTK_IS_WIDGET(d->folder)) gtk_widget_set_sensitive(d->folder, TRUE);
             delete d;
             return G_SOURCE_REMOVE;
-        }, new ReenableData{choose_file_btn, choose_folder_btn, clear_btn});
+        }, new ReenableData{send_btn, clear_btn_widget, cancel_btn, choose_file_btn, choose_folder_btn});
     });
     server_thread_.detach();
+}
+
+void FileSenderPanel::cancel_server() {
+    if (cancel_flag_) {
+        cancel_flag_->store(true);
+    }
+    gtk_label_set_text(GTK_LABEL(pin_label_), "");
+    gtk_widget_set_visible(pin_label_, FALSE);
+    gtk_widget_set_visible(progress_bar_, FALSE);
+    gtk_label_set_text(GTK_LABEL(progress_label_), "");
+    gtk_label_set_text(GTK_LABEL(status_label_), "Sharing cancelled.");
 }
 
 // ─── GTK Callbacks ──────────────────────────────────────────────────────────
@@ -402,6 +434,11 @@ void FileSenderPanel::on_clear_clicked(GtkButton* /*button*/, gpointer user_data
     gtk_widget_set_visible(self->progress_bar_, FALSE);
     gtk_label_set_text(GTK_LABEL(self->status_label_), "");
     gtk_label_set_text(GTK_LABEL(self->progress_label_), "");
+}
+
+void FileSenderPanel::on_cancel_clicked(GtkButton* /*button*/, gpointer user_data) {
+    auto* self = static_cast<FileSenderPanel*>(user_data);
+    self->cancel_server();
 }
 
 gboolean FileSenderPanel::on_drop(GtkDropTarget* /*target*/, const GValue* value,
