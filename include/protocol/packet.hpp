@@ -5,6 +5,14 @@
 
 namespace protocol {
 
+enum class CommandType : uint32_t {
+    FILE_META = 1,
+    FILE_CHUNK = 2,
+    CANCEL = 3,
+    PING = 4,
+    PONG = 5
+};
+
 // Fixed 16-byte header
 struct PacketHeader {
     uint32_t command;      // 4 bytes
