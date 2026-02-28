@@ -7,10 +7,13 @@
 #include <boost/asio.hpp>
 #include <thread>
 #include <chrono>
-#include <sys/statvfs.h>
-#include <sys/stat.h>
 #include <iomanip>
 #include <filesystem>
+#ifdef _WIN32
+  #include <windows.h>
+#else
+  #include <sys/statvfs.h>
+#endif
 
 using boost::asio::ip::tcp;
 
@@ -118,14 +121,15 @@ void Server::start(std::queue<TransferJob> jobs) {
         while (!jobs.empty()) {
             TransferJob job = jobs.front();
             
-            struct stat file_stat;
-            if (stat(job.filepath.c_str(), &file_stat) != 0) {
+            std::error_code ec;
+            auto fsize = std::filesystem::file_size(job.filepath, ec);
+            if (ec) {
                 std::cerr << "File not found: " << job.filepath << "\n";
                 jobs.pop();
                 continue;
             }
             
-            protocol::FileInfo file_info{job.filename, static_cast<uint64_t>(file_stat.st_size), "application/octet-stream"};
+            protocol::FileInfo file_info{job.filename, fsize, "application/octet-stream"};
             std::cout << "Initiating transfer for " << file_info.filename << "...\n";
             transfer::MessageSender::send_file_meta(socket, file_info);
 
@@ -261,14 +265,19 @@ void Client::connect(const std::string& ip, unsigned short port) {
                 std::cout << "\nIncoming file: " << meta.filename << " (" << format_size(meta.size) << ")\n";
                 
                 // Perform Disk Space Check
-                struct statvfs disk_stat;
-                if (statvfs(".", &disk_stat) != 0) {
-                    std::cerr << "Error: Could not determine available disk space.\n";
-                    break;
+                uint64_t available_space = 0;
+#ifdef _WIN32
+                ULARGE_INTEGER free_bytes;
+                if (GetDiskFreeSpaceExA(".", &free_bytes, nullptr, nullptr)) {
+                    available_space = free_bytes.QuadPart;
                 }
-                
-                uint64_t available_space = disk_stat.f_bavail * disk_stat.f_frsize;
-                if (available_space < meta.size) {
+#else
+                struct statvfs disk_stat;
+                if (statvfs(".", &disk_stat) == 0) {
+                    available_space = static_cast<uint64_t>(disk_stat.f_bavail) * disk_stat.f_frsize;
+                }
+#endif
+                if (available_space > 0 && available_space < meta.size) {
                     std::cout << "Error: Insufficient disk space! Requires " << format_size(meta.size) 
                               << " but only " << format_size(available_space) << " available.\n";
                     std::cout << "Rejecting file automatically.\n";
@@ -279,11 +288,12 @@ void Client::connect(const std::string& ip, unsigned short port) {
 
                 // Check if .fluxpart already exists to resume
                 uint64_t resume_offset = 0;
-                struct stat file_stat;
                 std::string save_path = save_dir + "/" + meta.filename;
                 std::string part_file = save_path + ".fluxpart";
-                if (stat(part_file.c_str(), &file_stat) == 0) {
-                    resume_offset = file_stat.st_size;
+                std::error_code ec;
+                auto part_size = std::filesystem::file_size(part_file, ec);
+                if (!ec) {
+                    resume_offset = part_size;
                     std::cout << "Found partial download. " << format_size(resume_offset) << " out of " << format_size(meta.size) << " downloaded.\n";
                 }
 
@@ -497,13 +507,14 @@ void Server::start_gui(std::queue<TransferJob> jobs, ServerCallbacks callbacks) 
         while (!jobs.empty()) {
             TransferJob job = jobs.front();
 
-            struct stat file_stat;
-            if (stat(job.filepath.c_str(), &file_stat) != 0) {
+            std::error_code ec;
+            auto fsize = std::filesystem::file_size(job.filepath, ec);
+            if (ec) {
                 jobs.pop();
                 continue;
             }
 
-            protocol::FileInfo file_info{job.filename, static_cast<uint64_t>(file_stat.st_size), "application/octet-stream"};
+            protocol::FileInfo file_info{job.filename, fsize, "application/octet-stream"};
             if (callbacks.on_status) callbacks.on_status("Sending: " + file_info.filename);
             transfer::MessageSender::send_file_meta(socket, file_info);
 

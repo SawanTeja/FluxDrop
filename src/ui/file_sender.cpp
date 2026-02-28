@@ -6,7 +6,6 @@
 #include "protocol/file_meta.hpp"
 #include <iostream>
 #include <filesystem>
-#include <sys/stat.h>
 
 namespace fs = std::filesystem;
 
@@ -231,9 +230,10 @@ void FileSenderPanel::update_file_list_ui() {
         std::string display = "📄 " + p.filename().string();
 
         // Get file size
-        struct stat st;
-        if (stat(file.c_str(), &st) == 0) {
-            double size = st.st_size;
+        std::error_code ec;
+        auto fsize = fs::file_size(file, ec);
+        if (!ec) {
+            double size = static_cast<double>(fsize);
             const char* units[] = {"B", "KB", "MB", "GB"};
             int i = 0;
             while (size >= 1024 && i < 3) { size /= 1024; i++; }
