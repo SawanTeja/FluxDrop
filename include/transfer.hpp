@@ -14,7 +14,7 @@ using TransferProgressCallback = std::function<void(const std::string&, uint64_t
 enum class TransferState {
     COMPLETED,
     CANCELLED,
-    ERROR
+    FAILED
 };
 
 class MessageSender {

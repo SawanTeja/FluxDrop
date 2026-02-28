@@ -22,7 +22,7 @@ namespace networking {
 std::string get_local_ip(boost::asio::io_context& io_context) {
     try {
         boost::asio::ip::udp::socket socket(io_context);
-        socket.connect(boost::asio::ip::udp::endpoint(boost::asio::ip::address::from_string("8.8.8.8"), 53));
+        socket.connect(boost::asio::ip::udp::endpoint(boost::asio::ip::make_address("8.8.8.8"), 53));
         return socket.local_endpoint().address().to_string();
     } catch (...) {
         return "127.0.0.1";
@@ -608,7 +608,7 @@ void Client::connect_gui(const std::string& ip, unsigned short port,
 
                 if (state == transfer::TransferState::COMPLETED) {
                     if (callbacks.on_status) callbacks.on_status("Received: " + meta.filename);
-                } else if (state == transfer::TransferState::ERROR) {
+                } else if (state == transfer::TransferState::FAILED) {
                     if (callbacks.on_error) callbacks.on_error("Failed to receive: " + meta.filename);
                     break;
                 }

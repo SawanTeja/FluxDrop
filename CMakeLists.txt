@@ -10,6 +10,7 @@ include_directories(include)
 find_package(Boost REQUIRED)
 find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
+find_package(nlohmann_json REQUIRED)
 pkg_check_modules(SODIUM REQUIRED libsodium)
 pkg_check_modules(GTK4 REQUIRED gtk4)
 
@@ -33,8 +34,14 @@ target_include_directories(fluxdrop PRIVATE
 
 target_link_libraries(fluxdrop PRIVATE
     Threads::Threads
+    nlohmann_json::nlohmann_json
+    ${Boost_LIBRARIES}
     ${SODIUM_LIBRARIES}
     ${GTK4_LIBRARIES}
 )
+
+if (WIN32)
+    target_link_libraries(fluxdrop PRIVATE ws2_32 mswsock bcrypt)
+endif()
 
 target_compile_options(fluxdrop PRIVATE ${GTK4_CFLAGS_OTHER})

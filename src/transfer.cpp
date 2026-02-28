@@ -154,7 +154,7 @@ TransferState MessageReceiver::receive_file(boost::asio::ip::tcp::socket& socket
         std::ofstream file(part_file, mode);
         if (!file.is_open()) {
             std::cerr << "Could not open file for writing: " << part_file << "\n";
-            return TransferState::ERROR;
+            return TransferState::FAILED;
         }
 
         uint64_t total_received = start_offset;
@@ -217,13 +217,13 @@ TransferState MessageReceiver::receive_file(boost::asio::ip::tcp::socket& socket
         // Rename .fluxpart to final filename
         if (std::rename(part_file.c_str(), filepath.c_str()) != 0) {
              std::cerr << "Failed to rename temp file to: " << filepath << "\n";
-             return TransferState::ERROR;
+             return TransferState::FAILED;
         }
 
         return TransferState::COMPLETED;
     } catch (std::exception& e) {
         std::cerr << "\nMessageReceiver Exception (receive_file): " << e.what() << "\n";
-        return TransferState::ERROR;
+        return TransferState::FAILED;
     }
 }
 
