@@ -8,7 +8,6 @@
 #include <iomanip>
 #include <atomic>
 #include "fluxdrop_core.h"
-#include "ui/main_window.hpp"
 
 namespace fs = std::filesystem;
 
@@ -57,11 +56,6 @@ void on_device_found(const fd_device_t* dev) {
 }
 
 int main(int argc, char* argv[]) {
-    // No arguments → launch GUI
-    if (argc == 1) {
-        return ui::run_gui(argc, argv);
-    }
-
     fd_init();
 
     // CLI connect mode
@@ -107,7 +101,7 @@ int main(int argc, char* argv[]) {
         fd_stop_discovery();
     } 
     // CLI send mode
-    else {
+    else if (argc > 1) {
         std::vector<std::string> string_paths;
         for (int i = 1; i < argc; ++i) {
             string_paths.push_back(argv[i]);
@@ -124,6 +118,10 @@ int main(int argc, char* argv[]) {
         while (!g_transfer_done) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
+    } else {
+        std::cout << "Usage: fluxdrop <file1> <file2> ...\n";
+        std::cout << "       fluxdrop join <room_id>\n";
+        std::cout << "       fluxdrop connect <ip> <port>\n";
     }
     
     fd_cleanup();

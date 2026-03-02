@@ -1,7 +1,6 @@
 #pragma once
 
 #include <gtk/gtk.h>
-#include "networking.hpp"
 #include <memory>
 #include <vector>
 #include <string>

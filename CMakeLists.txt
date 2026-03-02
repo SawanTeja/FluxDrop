@@ -40,23 +40,15 @@ if (WIN32)
     target_link_libraries(fluxdrop_core PUBLIC ws2_32 mswsock bcrypt)
 endif()
 
-# --- Main Executable (CLI + GUI) ---
+# --- Main Executable (CLI) ---
 add_executable(fluxdrop
     src/main.cpp
-    src/ui/main_window.cpp
-    src/ui/device_list.cpp
-    src/ui/file_sender.cpp
-    src/ui/transfer_dialog.cpp
 )
 
 target_include_directories(fluxdrop PRIVATE
     include
-    ${GTK4_INCLUDE_DIRS}
 )
 
 target_link_libraries(fluxdrop PRIVATE
     fluxdrop_core
-    ${GTK4_LIBRARIES}
 )
-
-target_compile_options(fluxdrop PRIVATE ${GTK4_CFLAGS_OTHER})

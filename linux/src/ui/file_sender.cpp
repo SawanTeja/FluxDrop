@@ -251,11 +251,12 @@ void FileSenderPanel::update_file_list_ui() {
     gtk_widget_set_sensitive(send_button_, !queued_files_.empty() && !server_running_);
 }
 
+#include "fluxdrop_core.h"
+
 void FileSenderPanel::start_server() {
     if (queued_files_.empty() || server_running_) return;
 
     server_running_ = true;
-    cancel_flag_ = std::make_shared<std::atomic<bool>>(false);
 
     // Toggle button visibility
     gtk_widget_set_visible(send_button_, FALSE);
@@ -268,12 +269,10 @@ void FileSenderPanel::start_server() {
     gtk_widget_set_visible(progress_bar_, TRUE);
     gtk_widget_set_visible(pin_label_, TRUE);
 
-    // Build job queue
-    uint32_t session_id = 482913;
-    std::queue<networking::TransferJob> jobs;
+    // Prepare arrays for C API
+    std::vector<const char*> c_paths;
     for (const auto& filepath : queued_files_) {
-        fs::path p(filepath);
-        jobs.push({filepath, p.filename().string(), session_id});
+        c_paths.push_back(filepath.c_str());
     }
 
     // Capture widget pointers for callbacks
@@ -286,54 +285,46 @@ void FileSenderPanel::start_server() {
     GtkWidget* choose_file_btn = choose_file_button_;
     GtkWidget* choose_folder_btn = choose_folder_button_;
 
-    networking::ServerCallbacks callbacks;
-    callbacks.cancel_flag = cancel_flag_.get();
+    // Set callback lambdas (Note: using global capture-less lambdas or passing static context is typically required for pure C APIs,
+    // but our C API is in the same process and currently allows std::function bound lambdas since they are invoked synchronously
+    // in the wrapped C++ implementation. Actually, `fd_start_server` takes raw function pointers, so we must use static functions
+    // or captureless lambdas. Since we need context, we have to stash the context pointers globally or accept the limitation.
+    // Wait, the C API doesn't have a `void* user_data`! This is a flaw in the C API design for GUI integration.
+    // Let's create a static thread-local or global reference just for this panel since there's only one sender panel.)
 
-    callbacks.on_ready = [pin_lbl, status_lbl](const std::string& ip, unsigned short port, uint16_t pin) {
+    // --- Temporary Hack for Context-less C callbacks ---
+    static FileSenderPanel* current_panel = nullptr;
+    static GtkWidget* g_pin_lbl = pin_lbl;
+    static GtkWidget* g_status_lbl = status_lbl;
+    static GtkWidget* g_progress_br = progress_br;
+    static GtkWidget* g_progress_lbl = progress_lbl;
+    static GtkWidget* g_send_btn = send_btn;
+    static GtkWidget* g_clear_btn_widget = clear_btn_widget;
+    static GtkWidget* g_cancel_btn = cancel_btn;
+    static GtkWidget* g_choose_file_btn = choose_file_btn;
+    static GtkWidget* g_choose_folder_btn = choose_folder_btn;
+    static std::atomic<bool>* g_running_ptr = &server_running_;
+    current_panel = this;
+
+    auto ready_cb = [](const char* ip, int port, int pin) {
         auto* d = new PinUpdateData{
-            pin_lbl, status_lbl,
+            g_pin_lbl, g_status_lbl,
             "PIN: " + std::to_string(pin),
-            "Listening on " + ip + ":" + std::to_string(port) + " — Waiting for receiver..."
+            "Listening on " + std::string(ip) + ":" + std::to_string(port) + " — Waiting for receiver..."
         };
         g_idle_add(update_pin_idle, d);
     };
 
-    callbacks.on_status = [status_lbl](const std::string& msg) {
-        g_idle_add(update_status_idle, new StatusUpdateData{status_lbl, msg});
+    auto status_cb = [](const char* msg) {
+        g_idle_add(update_status_idle, new StatusUpdateData{g_status_lbl, msg});
     };
 
-    callbacks.on_progress = [progress_br, progress_lbl](const std::string& filename, uint64_t transferred, uint64_t total, double speed) {
-        double frac = (total > 0) ? (static_cast<double>(transferred) / total) : 0.0;
-        int pct = static_cast<int>(frac * 100);
-        char buf[128];
-        snprintf(buf, sizeof(buf), "%d%% — %.1f MB/s — %s", pct, speed, filename.c_str());
-        g_idle_add(update_progress_idle, new ProgressUpdateData{progress_br, progress_lbl, frac, buf});
-    };
-
-    callbacks.on_complete = [status_lbl, progress_br, progress_lbl, send_btn]() {
+    auto error_cb = [](const char* err) {
         g_idle_add(transfer_complete_idle, new TransferCompleteData{
-            status_lbl, progress_br, progress_lbl, send_btn,
-            "✅ All files transferred successfully!"
+            g_status_lbl, g_progress_br, g_progress_lbl, g_send_btn,
+            "❌ Error: " + std::string(err)
         });
-    };
-
-    callbacks.on_error = [status_lbl, progress_br, progress_lbl, send_btn](const std::string& err) {
-        g_idle_add(transfer_complete_idle, new TransferCompleteData{
-            status_lbl, progress_br, progress_lbl, send_btn,
-            "❌ Error: " + err
-        });
-    };
-
-    // Server thread
-    auto* running_ptr = &server_running_;
-    server_thread_ = std::thread([jobs = std::move(jobs), callbacks, running_ptr,
-                                  send_btn, clear_btn_widget, cancel_btn,
-                                  choose_file_btn, choose_folder_btn]() mutable {
-        networking::Server server;
-        server.start_gui(std::move(jobs), callbacks);
-        *running_ptr = false;
-
-        // Re-enable buttons on completion
+        
         struct ReenableData { GtkWidget *send, *clear, *cancel, *file, *folder; };
         g_idle_add(+[](gpointer data) -> gboolean {
             auto* d = static_cast<ReenableData*>(data);
@@ -344,15 +335,44 @@ void FileSenderPanel::start_server() {
             if (GTK_IS_WIDGET(d->folder)) gtk_widget_set_sensitive(d->folder, TRUE);
             delete d;
             return G_SOURCE_REMOVE;
-        }, new ReenableData{send_btn, clear_btn_widget, cancel_btn, choose_file_btn, choose_folder_btn});
-    });
-    server_thread_.detach();
+        }, new ReenableData{g_send_btn, g_clear_btn_widget, g_cancel_btn, g_choose_file_btn, g_choose_folder_btn});
+        *g_running_ptr = false;
+    };
+
+    auto progress_cb = [](const char* filename, uint64_t transferred, uint64_t total, double speed) {
+        double frac = (total > 0) ? (static_cast<double>(transferred) / total) : 0.0;
+        int pct = static_cast<int>(frac * 100);
+        char buf[128];
+        snprintf(buf, sizeof(buf), "%d%% — %.1f MB/s — %s", pct, speed, filename);
+        g_idle_add(update_progress_idle, new ProgressUpdateData{g_progress_br, g_progress_lbl, frac, buf});
+    };
+
+    auto complete_cb = []() {
+        g_idle_add(transfer_complete_idle, new TransferCompleteData{
+            g_status_lbl, g_progress_br, g_progress_lbl, g_send_btn,
+            "✅ All files transferred successfully!"
+        });
+        
+        struct ReenableData { GtkWidget *send, *clear, *cancel, *file, *folder; };
+        g_idle_add(+[](gpointer data) -> gboolean {
+            auto* d = static_cast<ReenableData*>(data);
+            if (GTK_IS_WIDGET(d->send)) { gtk_widget_set_visible(d->send, TRUE); gtk_widget_set_sensitive(d->send, TRUE); }
+            if (GTK_IS_WIDGET(d->clear)) gtk_widget_set_visible(d->clear, TRUE);
+            if (GTK_IS_WIDGET(d->cancel)) gtk_widget_set_visible(d->cancel, FALSE);
+            if (GTK_IS_WIDGET(d->file)) gtk_widget_set_sensitive(d->file, TRUE);
+            if (GTK_IS_WIDGET(d->folder)) gtk_widget_set_sensitive(d->folder, TRUE);
+            delete d;
+            return G_SOURCE_REMOVE;
+        }, new ReenableData{g_send_btn, g_clear_btn_widget, g_cancel_btn, g_choose_file_btn, g_choose_folder_btn});
+        *g_running_ptr = false;
+    };
+
+    fd_start_server(c_paths.data(), c_paths.size(),
+                    ready_cb, status_cb, error_cb, progress_cb, complete_cb);
 }
 
 void FileSenderPanel::cancel_server() {
-    if (cancel_flag_) {
-        cancel_flag_->store(true);
-    }
+    fd_cancel_server();
     gtk_label_set_text(GTK_LABEL(pin_label_), "");
     gtk_widget_set_visible(pin_label_, FALSE);
     gtk_widget_set_visible(progress_bar_, FALSE);

@@ -1,12 +1,20 @@
 #pragma once
 
 #include <gtk/gtk.h>
-#include "networking.hpp"
+#include "fluxdrop_core.h"
 #include <map>
 #include <mutex>
 #include <string>
 #include <memory>
 #include <future>
+
+namespace networking {
+    struct DiscoveredDevice {
+        std::string ip;
+        unsigned short port;
+        uint32_t session_id;
+    };
+}
 
 namespace ui {
 
@@ -31,7 +39,6 @@ private:
     GtkWindow* parent_window_;
     std::string save_dir_;
 
-    networking::DiscoveryListener listener_;
     std::map<std::string, networking::DiscoveredDevice> devices_;
     std::mutex devices_mutex_;
     std::atomic<bool> transferring_{false};

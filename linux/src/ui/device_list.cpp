@@ -218,53 +218,53 @@ void on_connect_btn_clicked(GtkButton* /*btn*/, gpointer data) {
     auto* transferring = &cd->panel->transferring_;
     GtkWindow* parent_win = cd->panel->parent_window_;
 
-    networking::ClientCallbacks callbacks;
-    callbacks.cancel_flag = cd->panel->cancel_flag_.get();
+    // Storing panel state globally for callbacks (hacky but functional for this scope)
+    static DeviceListPanel* g_client_panel = cd->panel;
+    g_client_panel = cd->panel;
 
-    callbacks.on_file_request = [parent_win](const std::string& filename, uint64_t size) -> bool {
+    auto status_cb = [](const char* msg) {
+        g_idle_add(update_recv_status_idle, new RecvStatusData{g_client_panel->status_label_, msg});
+    };
+
+    auto error_cb = [](const char* err) {
+        g_client_panel->transferring_ = false;
+        g_idle_add(+[](gpointer ptr){
+            gtk_widget_set_visible(static_cast<GtkWidget*>(ptr), FALSE);
+            return G_SOURCE_REMOVE;
+        }, g_client_panel->cancel_button_);
+        g_idle_add(recv_complete_idle, new RecvCompleteData{g_client_panel->status_label_, g_client_panel->progress_bar_, "❌ " + std::string(err)});
+    };
+
+    auto file_request_cb = [](const char* filename, uint64_t size) -> bool {
         std::promise<bool> prom;
         auto fut = prom.get_future();
-        g_idle_add(file_request_idle, new FileRequestData{parent_win, filename, size, &prom});
+        g_idle_add(file_request_idle, new FileRequestData{g_client_panel->parent_window_, filename, size, &prom});
         return fut.get();
     };
 
-    callbacks.on_status = [status_lbl](const std::string& msg) {
-        g_idle_add(update_recv_status_idle, new RecvStatusData{status_lbl, msg});
-    };
-
-    callbacks.on_progress = [progress_br, progress_lbl](const std::string& filename, uint64_t transferred, uint64_t total, double speed) {
+    auto progress_cb = [](const char* filename, uint64_t transferred, uint64_t total, double speed) {
         double frac = (total > 0) ? (static_cast<double>(transferred) / total) : 0.0;
         int pct = static_cast<int>(frac * 100);
         char buf[128];
-        snprintf(buf, sizeof(buf), "%d%% — %.1f MB/s — %s", pct, speed, filename.c_str());
-        g_idle_add(update_recv_progress_idle, new RecvProgressData{progress_br, progress_lbl, frac, std::string(buf)});
+        snprintf(buf, sizeof(buf), "%d%% — %.1f MB/s — %s", pct, speed, filename);
+        g_idle_add(update_recv_progress_idle, new RecvProgressData{g_client_panel->progress_bar_, g_client_panel->progress_label_, frac, std::string(buf)});
     };
 
-    callbacks.on_complete = [status_lbl, progress_br, cancel_btn, transferring]() {
-        *transferring = false;
+    auto complete_cb = []() {
+        g_client_panel->transferring_ = false;
         g_idle_add(+[](gpointer ptr){
             gtk_widget_set_visible(static_cast<GtkWidget*>(ptr), FALSE);
             return G_SOURCE_REMOVE;
-        }, cancel_btn);
-        g_idle_add(recv_complete_idle, new RecvCompleteData{status_lbl, progress_br, "✅ All files received!"});
-    };
-
-    callbacks.on_error = [status_lbl, progress_br, cancel_btn, transferring](const std::string& err) {
-        *transferring = false;
-        g_idle_add(+[](gpointer ptr){
-            gtk_widget_set_visible(static_cast<GtkWidget*>(ptr), FALSE);
-            return G_SOURCE_REMOVE;
-        }, cancel_btn);
-        g_idle_add(recv_complete_idle, new RecvCompleteData{status_lbl, progress_br, "❌ " + err});
+        }, g_client_panel->cancel_button_);
+        g_idle_add(recv_complete_idle, new RecvCompleteData{g_client_panel->status_label_, g_client_panel->progress_bar_, "✅ All files received!"});
     };
 
     auto dev = cd->device;
     auto pin_copy = pin;
     auto save_dir_copy = cd->save_dir;
-    std::thread([dev, pin_copy, save_dir_copy, callbacks]() {
-        networking::Client client;
-        client.connect_gui(dev.ip, dev.port, pin_copy, save_dir_copy, callbacks);
-    }).detach();
+    
+    fd_connect(dev.ip.c_str(), dev.port, pin_copy.c_str(), save_dir_copy.c_str(),
+               status_cb, error_cb, file_request_cb, progress_cb, complete_cb);
 
     delete cd;
 }
@@ -394,14 +394,22 @@ DeviceListPanel::~DeviceListPanel() {
     stop_discovery();
 }
 
+#include "fluxdrop_core.h"
+
 void DeviceListPanel::start_discovery() {
-    listener_.start([this](const networking::DiscoveredDevice& device) {
-        on_device_found(device);
+    static DeviceListPanel* g_panel = this;
+    fd_start_discovery(482913, [](const fd_device_t* dev) {
+        if (!dev) return;
+        networking::DiscoveredDevice cpp_dev;
+        cpp_dev.ip = dev->ip;
+        cpp_dev.port = dev->port;
+        cpp_dev.session_id = dev->session_id;
+        g_panel->on_device_found(cpp_dev);
     });
 }
 
 void DeviceListPanel::stop_discovery() {
-    listener_.stop();
+    fd_stop_discovery();
 }
 
 void DeviceListPanel::on_device_found(const networking::DiscoveredDevice& device) {
