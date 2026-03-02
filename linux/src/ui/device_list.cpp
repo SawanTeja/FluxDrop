@@ -228,7 +228,7 @@ void on_connect_btn_clicked(GtkButton* /*btn*/, gpointer data) {
 
     auto error_cb = [](const char* err) {
         g_client_panel->transferring_ = false;
-        g_idle_add(+[](gpointer ptr){
+        g_idle_add(+[](gpointer ptr) -> gboolean {
             gtk_widget_set_visible(static_cast<GtkWidget*>(ptr), FALSE);
             return G_SOURCE_REMOVE;
         }, g_client_panel->cancel_button_);
@@ -252,7 +252,7 @@ void on_connect_btn_clicked(GtkButton* /*btn*/, gpointer data) {
 
     auto complete_cb = []() {
         g_client_panel->transferring_ = false;
-        g_idle_add(+[](gpointer ptr){
+        g_idle_add(+[](gpointer ptr) -> gboolean {
             gtk_widget_set_visible(static_cast<GtkWidget*>(ptr), FALSE);
             return G_SOURCE_REMOVE;
         }, g_client_panel->cancel_button_);
@@ -397,7 +397,8 @@ DeviceListPanel::~DeviceListPanel() {
 #include "fluxdrop_core.h"
 
 void DeviceListPanel::start_discovery() {
-    static DeviceListPanel* g_panel = this;
+    static DeviceListPanel* g_panel;
+    g_panel = this;
     fd_start_discovery(482913, [](const fd_device_t* dev) {
         if (!dev) return;
         networking::DiscoveredDevice cpp_dev;

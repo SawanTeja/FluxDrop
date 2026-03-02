@@ -86,7 +86,7 @@ protocol::FileInfo MessageReceiver::receive_file_meta(boost::asio::ip::tcp::sock
     return info;
 }
 
-bool MessageSender::send_file(boost::asio::ip::tcp::socket& socket, const std::string& filepath, uint32_t session_id, uint64_t start_offset, TransferProgressCallback progress_cb) {
+bool MessageSender::send_file(boost::asio::ip::tcp::socket& socket, const std::string& filepath, uint32_t session_id, uint64_t start_offset, TransferProgressCallback progress_cb, std::atomic<bool>* cancel_flag) {
     try {
         std::ifstream file(filepath, std::ios::binary);
         if (!file.is_open()) {
@@ -105,6 +105,16 @@ bool MessageSender::send_file(boost::asio::ip::tcp::socket& socket, const std::s
 
         std::vector<char> buffer(64 * 1024); // 64KB per chunk
         while (file.read(buffer.data(), buffer.size()) || file.gcount() > 0) {
+            if (cancel_flag && cancel_flag->load()) {
+                std::cout << "\nTransfer cancelled locally.\n";
+                // Optionally send a CANCEL packet, though closing socket is safer.
+                protocol::PacketHeader cancel_header{
+                    static_cast<uint32_t>(protocol::CommandType::CANCEL), 0, session_id, 0
+                };
+                send_header(socket, cancel_header);
+                return false;
+            }
+
             std::streamsize bytes_read = file.gcount();
             protocol::PacketHeader header{
                 static_cast<uint32_t>(protocol::CommandType::FILE_CHUNK),

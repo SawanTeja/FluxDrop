@@ -185,6 +185,7 @@ void MainWindow::on_destroy(GtkWidget* widget, gpointer data) {
     if (self->receive_panel_) {
         self->receive_panel_->stop_discovery();
     }
+    delete self;
 }
 
 MainWindow::MainWindow(GtkApplication* app) {

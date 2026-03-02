@@ -25,7 +25,8 @@ public:
     static void send_file_meta(boost::asio::ip::tcp::socket& socket, const protocol::FileInfo& info);
     static bool send_file(boost::asio::ip::tcp::socket& socket, const std::string& filepath,
                           uint32_t session_id, uint64_t start_offset = 0,
-                          TransferProgressCallback progress_cb = nullptr);
+                          TransferProgressCallback progress_cb = nullptr,
+                          std::atomic<bool>* cancel_flag = nullptr);
 };
 
 class MessageReceiver {

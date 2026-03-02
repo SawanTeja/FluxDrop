@@ -1,20 +1,13 @@
 #pragma once
 
 #include <gtk/gtk.h>
+#include "networking.hpp"
 #include "fluxdrop_core.h"
 #include <map>
 #include <mutex>
 #include <string>
 #include <memory>
 #include <future>
-
-namespace networking {
-    struct DiscoveredDevice {
-        std::string ip;
-        unsigned short port;
-        uint32_t session_id;
-    };
-}
 
 namespace ui {
 

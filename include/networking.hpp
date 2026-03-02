@@ -6,6 +6,8 @@
 #include <functional>
 #include <thread>
 #include <atomic>
+#include <mutex>
+#include <boost/asio.hpp>
 
 namespace networking {
 
@@ -56,11 +58,16 @@ private:
     std::atomic<bool> running_{false};
     std::thread thread_;
 };
-
 class Server {
 public:
     void start(std::queue<TransferJob> jobs);
     void start_gui(std::queue<TransferJob> jobs, ServerCallbacks callbacks);
+    void stop();
+private:
+    std::mutex mtx_;
+    boost::asio::ip::tcp::acceptor* acceptor_ = nullptr;
+    boost::asio::ip::tcp::socket* socket_ = nullptr;
+    bool stopped_ = false;
 };
 
 class Client {
@@ -70,6 +77,11 @@ public:
     void connect_gui(const std::string& ip, unsigned short port,
                      const std::string& pin, const std::string& save_dir,
                      ClientCallbacks callbacks);
+    void stop();
+private:
+    std::mutex mtx_;
+    boost::asio::ip::tcp::socket* socket_ = nullptr;
+    bool stopped_ = false;
 };
 
 } // namespace networking

@@ -492,31 +492,39 @@ void Server::start_gui(std::queue<TransferJob> jobs, ServerCallbacks callbacks) 
             } catch (...) {}
         });
 
-        // Wait for connection (cancellable)
         tcp::socket socket(io_context);
-        bool connected = false;
-        bool cancelled = false;
 
-        acceptor.async_accept(socket, [&connected](const boost::system::error_code& ec) {
-            if (!ec) connected = true;
-        });
-
-        // Poll until connected or cancelled
-        while (!connected && !cancelled) {
-            io_context.poll();
-            io_context.restart();
-            if (callbacks.cancel_flag && callbacks.cancel_flag->load()) {
-                cancelled = true;
-                break;
+        struct ServerSocketGuard {
+            Server* s;
+            ~ServerSocketGuard() {
+                std::lock_guard<std::mutex> lock(s->mtx_);
+                s->acceptor_ = nullptr;
+                s->socket_ = nullptr;
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        } sg{this};
+
+        {
+            std::lock_guard<std::mutex> lock(mtx_);
+            if (stopped_ || (callbacks.cancel_flag && callbacks.cancel_flag->load())) {
+                boost::system::error_code ec;
+                acceptor.close(ec);
+            }
+            acceptor_ = &acceptor;
+            socket_ = &socket;
+        }
+
+        boost::system::error_code accept_ec;
+        acceptor.accept(socket, accept_ec);
+
+        {
+            std::lock_guard<std::mutex> lock(mtx_);
+            acceptor_ = nullptr;
         }
 
         broadcasting = false;
         if (broadcast_thread.joinable()) broadcast_thread.join();
 
-        if (cancelled) {
-            acceptor.close();
+        if (accept_ec || (callbacks.cancel_flag && callbacks.cancel_flag->load())) {
             if (callbacks.on_status) callbacks.on_status("Sharing cancelled.");
             return;
         }
@@ -571,11 +579,11 @@ void Server::start_gui(std::queue<TransferJob> jobs, ServerCallbacks callbacks) 
                 }
 
                 if (header.command == static_cast<uint32_t>(protocol::CommandType::PONG)) {
-                    transfer::MessageSender::send_file(socket, job.filepath, header.session_id, 0, callbacks.on_progress);
+                    transfer::MessageSender::send_file(socket, job.filepath, header.session_id, 0, callbacks.on_progress, callbacks.cancel_flag);
                     job_done = true;
                 } else if (header.command == static_cast<uint32_t>(protocol::CommandType::RESUME)) {
                     uint64_t offset = header.payload_size;
-                    transfer::MessageSender::send_file(socket, job.filepath, header.session_id, offset, callbacks.on_progress);
+                    transfer::MessageSender::send_file(socket, job.filepath, header.session_id, offset, callbacks.on_progress, callbacks.cancel_flag);
                     job_done = true;
                 } else if (header.command == static_cast<uint32_t>(protocol::CommandType::CANCEL)) {
                     job_done = true;
@@ -600,6 +608,23 @@ void Client::connect_gui(const std::string& ip, unsigned short port,
     try {
         boost::asio::io_context io_context;
         tcp::socket socket(io_context);
+
+        struct ClientSocketGuard {
+            Client* c;
+            ~ClientSocketGuard() {
+                std::lock_guard<std::mutex> lock(c->mtx_);
+                c->socket_ = nullptr;
+            }
+        } cg{this};
+
+        {
+            std::lock_guard<std::mutex> lock(mtx_);
+            if (stopped_ || (callbacks.cancel_flag && callbacks.cancel_flag->load())) {
+                boost::system::error_code ec;
+                socket.close(ec);
+            }
+            socket_ = &socket;
+        }
         tcp::resolver resolver(io_context);
         boost::asio::connect(socket, resolver.resolve(ip, std::to_string(port)));
 
@@ -714,4 +739,27 @@ void Client::connect_gui(const std::string& ip, unsigned short port,
     }
 }
 
+void Server::stop() {
+    std::lock_guard<std::mutex> lock(mtx_);
+    stopped_ = true;
+    if (acceptor_) {
+        boost::system::error_code ec;
+        acceptor_->close(ec);
+    }
+    if (socket_) {
+        boost::system::error_code ec;
+        socket_->close(ec);
+    }
+}
+
+void Client::stop() {
+    std::lock_guard<std::mutex> lock(mtx_);
+    stopped_ = true;
+    if (socket_) {
+        boost::system::error_code ec;
+        socket_->close(ec);
+    }
+}
+
 } // namespace networking
+

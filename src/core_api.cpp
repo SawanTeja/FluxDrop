@@ -106,18 +106,18 @@ void fd_start_server(const char** file_paths, int num_files,
     g_server = std::make_unique<networking::Server>();
 
     // Start in background thread so C API is non-blocking
-    g_server_thread = std::thread([jobs, callbacks]() {
-        if (g_server) g_server->start_gui(jobs, callbacks);
+    g_server_thread = std::thread([s = g_server.get(), jobs, callbacks]() {
+        s->start_gui(jobs, callbacks);
     });
 }
 
 void fd_cancel_server() {
     g_server_cancel_flag = true;
+    if (g_server) {
+        g_server->stop();
+    }
     if (g_server_thread.joinable()) {
-         // Some network calls in Server might still block if not gracefully polled,
-         // but Asio close/cancel isn't fully exposed in current Server class.
-         // A hard kill or detach would ideally use Asio io_context::stop()
-        g_server_thread.detach(); 
+        g_server_thread.join(); 
     }
     g_server.reset();
 }
@@ -132,10 +132,13 @@ void fd_start_discovery(uint32_t room_id, fd_client_device_found_cb found_cb) {
     }
     g_discovery->start([found_cb](const networking::DiscoveredDevice& d) {
         if (found_cb) {
+            // Keep IP string alive for the duration of the callback
+            static thread_local std::string ip_storage;
+            ip_storage = d.ip;
             fd_device_t dev;
             dev.session_id = d.session_id;
             dev.port = d.port;
-            dev.ip = d.ip.c_str();
+            dev.ip = ip_storage.c_str();
             found_cb(&dev);
         }
     });
@@ -186,18 +189,19 @@ void fd_connect(const char* ip, int port, const char* pin, const char* save_dir,
 
     g_client = std::make_unique<networking::Client>();
 
-    g_client_thread = std::thread([ip_str, port, pin_str, dir_str, callbacks]() {
-        if (g_client) {
-            fs::create_directories(dir_str);
-            g_client->connect_gui(ip_str, port, pin_str, dir_str, callbacks);
-        }
+    g_client_thread = std::thread([c = g_client.get(), ip_str, port, pin_str, dir_str, callbacks]() {
+        fs::create_directories(dir_str);
+        c->connect_gui(ip_str, port, pin_str, dir_str, callbacks);
     });
 }
 
 void fd_cancel_client() {
     g_client_cancel_flag = true;
+    if (g_client) {
+        g_client->stop();
+    }
     if (g_client_thread.joinable()) {
-        g_client_thread.detach();
+        g_client_thread.join();
     }
     g_client.reset();
 }

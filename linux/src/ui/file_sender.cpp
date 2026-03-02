@@ -6,6 +6,7 @@
 #include "protocol/file_meta.hpp"
 #include <iostream>
 #include <filesystem>
+#include "fluxdrop_core.h"
 
 namespace fs = std::filesystem;
 
@@ -194,9 +195,7 @@ FileSenderPanel::FileSenderPanel(GtkWindow* parent_window)
 FileSenderPanel::~FileSenderPanel() {
     if (cancel_flag_) cancel_flag_->store(true);
     server_running_ = false;
-    if (server_thread_.joinable()) {
-        server_thread_.detach();
-    }
+    fd_cancel_server();
 }
 
 void FileSenderPanel::add_path(const std::string& path) {
@@ -251,8 +250,6 @@ void FileSenderPanel::update_file_list_ui() {
     gtk_widget_set_sensitive(send_button_, !queued_files_.empty() && !server_running_);
 }
 
-#include "fluxdrop_core.h"
-
 void FileSenderPanel::start_server() {
     if (queued_files_.empty() || server_running_) return;
 
@@ -293,18 +290,28 @@ void FileSenderPanel::start_server() {
     // Let's create a static thread-local or global reference just for this panel since there's only one sender panel.)
 
     // --- Temporary Hack for Context-less C callbacks ---
-    static FileSenderPanel* current_panel = nullptr;
-    static GtkWidget* g_pin_lbl = pin_lbl;
-    static GtkWidget* g_status_lbl = status_lbl;
-    static GtkWidget* g_progress_br = progress_br;
-    static GtkWidget* g_progress_lbl = progress_lbl;
-    static GtkWidget* g_send_btn = send_btn;
-    static GtkWidget* g_clear_btn_widget = clear_btn_widget;
-    static GtkWidget* g_cancel_btn = cancel_btn;
-    static GtkWidget* g_choose_file_btn = choose_file_btn;
-    static GtkWidget* g_choose_folder_btn = choose_folder_btn;
-    static std::atomic<bool>* g_running_ptr = &server_running_;
+    static FileSenderPanel* current_panel;
+    static GtkWidget* g_pin_lbl;
+    static GtkWidget* g_status_lbl;
+    static GtkWidget* g_progress_br;
+    static GtkWidget* g_progress_lbl;
+    static GtkWidget* g_send_btn;
+    static GtkWidget* g_clear_btn_widget;
+    static GtkWidget* g_cancel_btn;
+    static GtkWidget* g_choose_file_btn;
+    static GtkWidget* g_choose_folder_btn;
+    static std::atomic<bool>* g_running_ptr;
     current_panel = this;
+    g_pin_lbl = pin_lbl;
+    g_status_lbl = status_lbl;
+    g_progress_br = progress_br;
+    g_progress_lbl = progress_lbl;
+    g_send_btn = send_btn;
+    g_clear_btn_widget = clear_btn_widget;
+    g_cancel_btn = cancel_btn;
+    g_choose_file_btn = choose_file_btn;
+    g_choose_folder_btn = choose_folder_btn;
+    g_running_ptr = &server_running_;
 
     auto ready_cb = [](const char* ip, int port, int pin) {
         auto* d = new PinUpdateData{
