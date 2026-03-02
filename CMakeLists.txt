@@ -14,12 +14,35 @@ find_package(nlohmann_json REQUIRED)
 pkg_check_modules(SODIUM REQUIRED libsodium)
 pkg_check_modules(GTK4 REQUIRED gtk4)
 
-add_executable(fluxdrop
-    src/main.cpp
+# --- Core Library ---
+add_library(fluxdrop_core STATIC
     src/networking.cpp
     src/transfer.cpp
     src/packet.cpp
     src/security.cpp
+    src/core_api.cpp
+)
+
+target_include_directories(fluxdrop_core PUBLIC
+    include
+    ${Boost_INCLUDE_DIRS}
+    ${SODIUM_INCLUDE_DIRS}
+)
+
+target_link_libraries(fluxdrop_core PUBLIC
+    Threads::Threads
+    nlohmann_json::nlohmann_json
+    ${Boost_LIBRARIES}
+    ${SODIUM_LIBRARIES}
+)
+
+if (WIN32)
+    target_link_libraries(fluxdrop_core PUBLIC ws2_32 mswsock bcrypt)
+endif()
+
+# --- Main Executable (CLI + GUI) ---
+add_executable(fluxdrop
+    src/main.cpp
     src/ui/main_window.cpp
     src/ui/device_list.cpp
     src/ui/file_sender.cpp
@@ -27,21 +50,13 @@ add_executable(fluxdrop
 )
 
 target_include_directories(fluxdrop PRIVATE
-    ${Boost_INCLUDE_DIRS}
-    ${SODIUM_INCLUDE_DIRS}
+    include
     ${GTK4_INCLUDE_DIRS}
 )
 
 target_link_libraries(fluxdrop PRIVATE
-    Threads::Threads
-    nlohmann_json::nlohmann_json
-    ${Boost_LIBRARIES}
-    ${SODIUM_LIBRARIES}
+    fluxdrop_core
     ${GTK4_LIBRARIES}
 )
-
-if (WIN32)
-    target_link_libraries(fluxdrop PRIVATE ws2_32 mswsock bcrypt)
-endif()
 
 target_compile_options(fluxdrop PRIVATE ${GTK4_CFLAGS_OTHER})
