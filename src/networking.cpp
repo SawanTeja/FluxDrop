@@ -505,16 +505,35 @@ void Server::start_gui(std::queue<TransferJob> jobs, ServerCallbacks callbacks) 
 
         {
             std::lock_guard<std::mutex> lock(mtx_);
-            if (stopped_ || (callbacks.cancel_flag && callbacks.cancel_flag->load())) {
-                boost::system::error_code ec;
-                acceptor.close(ec);
-            }
             acceptor_ = &acceptor;
             socket_ = &socket;
         }
 
+        // Non-blocking accept loop — synchronous accept() is NOT reliably
+        // interrupted by closing the acceptor from another thread.
+        // Poll every 100ms and check the cancel flag instead.
+        acceptor.non_blocking(true);
         boost::system::error_code accept_ec;
-        acceptor.accept(socket, accept_ec);
+        while (true) {
+            {
+                std::lock_guard<std::mutex> lock(mtx_);
+                if (stopped_) {
+                    accept_ec = boost::asio::error::operation_aborted;
+                    break;
+                }
+            }
+            if (callbacks.cancel_flag && callbacks.cancel_flag->load()) {
+                accept_ec = boost::asio::error::operation_aborted;
+                break;
+            }
+            acceptor.accept(socket, accept_ec);
+            if (accept_ec == boost::asio::error::would_block ||
+                accept_ec == boost::asio::error::try_again) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                continue;
+            }
+            break; // Either success or real error
+        }
 
         {
             std::lock_guard<std::mutex> lock(mtx_);
