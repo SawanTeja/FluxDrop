@@ -38,14 +38,11 @@ typedef void (*fd_client_complete_cb)();
 // Core API
 // ----------------------------------------------------------------------------
 
-// Initialization and Cleanup (Good practice for libraries)
+// Initialization and Cleanup
 void fd_init();
 void fd_cleanup();
 
 // Server/Sender Functions
-// Starts the server sharing a list of exact file paths.
-// file_paths is an array of absolute paths to files/directories
-// num_files is the length of the array
 void fd_start_server(const char** file_paths, int num_files,
                      fd_server_ready_cb ready_cb,
                      fd_server_status_cb status_cb,
@@ -53,17 +50,15 @@ void fd_start_server(const char** file_paths, int num_files,
                      fd_server_progress_cb progress_cb,
                      fd_server_complete_cb complete_cb);
 
-// Cancels the active server session
+// Blocking cancel — stops server, joins thread, resets state
 void fd_cancel_server();
+// Non-blocking cancel — signals stop and closes sockets, thread exits on its own
+void fd_request_cancel_server();
 
 // Client/Receiver Functions
-// Starts listening for UDP broadcasts with a specific room ID
 void fd_start_discovery(uint32_t room_id, fd_client_device_found_cb found_cb);
-
-// Stops listening for UDP broadcasts
 void fd_stop_discovery();
 
-// Connects to a specific IP/port with a PIN, saving accepted files to save_dir
 void fd_connect(const char* ip, int port, const char* pin, const char* save_dir,
                 fd_client_status_cb status_cb,
                 fd_client_error_cb error_cb,
@@ -71,8 +66,10 @@ void fd_connect(const char* ip, int port, const char* pin, const char* save_dir,
                 fd_client_progress_cb progress_cb,
                 fd_client_complete_cb complete_cb);
 
-// Cancels the active client session/transfer
+// Blocking cancel — stops client, joins thread, resets state
 void fd_cancel_client();
+// Non-blocking cancel — signals stop and closes sockets, thread exits on its own
+void fd_request_cancel_client();
 
 #ifdef __cplusplus
 }

@@ -12,11 +12,13 @@
 
 namespace fs = std::filesystem;
 
+// Simple logging for the core API layer
+#define CORE_LOG(msg) std::cerr << "[FD-CORE] " << msg << std::endl
+
 // ----------------------------------------------------------------------------
 // Global Instances
 // ----------------------------------------------------------------------------
 
-// A quick and dirty way to manage the singleton-ish nature of the C API
 static std::unique_ptr<networking::Server> g_server;
 static std::unique_ptr<networking::Client> g_client;
 static std::unique_ptr<networking::DiscoveryListener> g_discovery;
@@ -34,13 +36,15 @@ static std::thread g_client_thread;
 extern "C" {
 
 void fd_init() {
-    // Initialization, if any e.g. networking startup for Windows
+    CORE_LOG("fd_init()");
 }
 
 void fd_cleanup() {
+    CORE_LOG("fd_cleanup() — stopping all");
     fd_cancel_server();
     fd_cancel_client();
     fd_stop_discovery();
+    CORE_LOG("fd_cleanup() — done");
 }
 
 // ----------------------------------------------------------------------------
@@ -54,15 +58,18 @@ void fd_start_server(const char** file_paths, int num_files,
                      fd_server_progress_cb progress_cb,
                      fd_server_complete_cb complete_cb) {
 
+    CORE_LOG("fd_start_server() — " << num_files << " paths");
+
     if (g_server_thread.joinable()) {
-        fd_cancel_server(); // stop existing
+        CORE_LOG("fd_start_server() — joining previous server thread first");
+        fd_cancel_server();
     }
 
     g_server_cancel_flag = false;
 
     // Parse files into TransferJobs
     std::queue<networking::TransferJob> jobs;
-    uint32_t room_id = 482913; // default room ID for now
+    uint32_t room_id = 482913;
 
     for (int i = 0; i < num_files; ++i) {
         fs::path path(file_paths[i]);
@@ -80,9 +87,12 @@ void fd_start_server(const char** file_paths, int num_files,
     }
 
     if (jobs.empty()) {
+        CORE_LOG("fd_start_server() — no valid files found");
         if (error_cb) error_cb("No valid files found to send.");
         return;
     }
+
+    CORE_LOG("fd_start_server() — " << jobs.size() << " files queued");
 
     // Set up callbacks
     networking::ServerCallbacks callbacks;
@@ -105,21 +115,35 @@ void fd_start_server(const char** file_paths, int num_files,
 
     g_server = std::make_unique<networking::Server>();
 
-    // Start in background thread so C API is non-blocking
+    // Capture raw pointer — safe because fd_cancel_server() joins before reset()
     g_server_thread = std::thread([s = g_server.get(), jobs, callbacks]() {
+        CORE_LOG("Server thread started");
         s->start_gui(jobs, callbacks);
+        CORE_LOG("Server thread finished");
     });
 }
 
 void fd_cancel_server() {
+    CORE_LOG("fd_cancel_server() — blocking cancel");
     g_server_cancel_flag = true;
     if (g_server) {
         g_server->stop();
     }
     if (g_server_thread.joinable()) {
-        g_server_thread.join(); 
+        CORE_LOG("fd_cancel_server() — joining thread...");
+        g_server_thread.join();
+        CORE_LOG("fd_cancel_server() — thread joined");
     }
     g_server.reset();
+}
+
+void fd_request_cancel_server() {
+    CORE_LOG("fd_request_cancel_server() — non-blocking cancel");
+    g_server_cancel_flag = true;
+    if (g_server) {
+        g_server->stop();
+    }
+    // Don't join — thread will exit on its own
 }
 
 // ----------------------------------------------------------------------------
@@ -127,6 +151,7 @@ void fd_cancel_server() {
 // ----------------------------------------------------------------------------
 
 void fd_start_discovery(uint32_t room_id, fd_client_device_found_cb found_cb) {
+    CORE_LOG("fd_start_discovery() — room " << room_id);
     if (!g_discovery) {
         g_discovery = std::make_unique<networking::DiscoveryListener>();
     }
@@ -145,6 +170,7 @@ void fd_start_discovery(uint32_t room_id, fd_client_device_found_cb found_cb) {
 }
 
 void fd_stop_discovery() {
+    CORE_LOG("fd_stop_discovery()");
     if (g_discovery) {
         g_discovery->stop();
         g_discovery.reset();
@@ -158,7 +184,10 @@ void fd_connect(const char* ip, int port, const char* pin, const char* save_dir,
                 fd_client_progress_cb progress_cb,
                 fd_client_complete_cb complete_cb) {
 
+    CORE_LOG("fd_connect() — " << (ip ? ip : "null") << ":" << port);
+
     if (g_client_thread.joinable()) {
+        CORE_LOG("fd_connect() — joining previous client thread first");
         fd_cancel_client();
     }
 
@@ -173,7 +202,7 @@ void fd_connect(const char* ip, int port, const char* pin, const char* save_dir,
     };
     callbacks.on_file_request = [file_request_cb](const std::string& file, uint64_t size) -> bool {
         if (file_request_cb) return file_request_cb(file.c_str(), size);
-        return true; // default true
+        return true;
     };
     callbacks.on_progress = [progress_cb](const std::string& file, uint64_t transferred, uint64_t total, double speed) {
         if (progress_cb) progress_cb(file.c_str(), transferred, total, speed);
@@ -190,20 +219,34 @@ void fd_connect(const char* ip, int port, const char* pin, const char* save_dir,
     g_client = std::make_unique<networking::Client>();
 
     g_client_thread = std::thread([c = g_client.get(), ip_str, port, pin_str, dir_str, callbacks]() {
+        CORE_LOG("Client thread started — connecting to " << ip_str << ":" << port);
         fs::create_directories(dir_str);
         c->connect_gui(ip_str, port, pin_str, dir_str, callbacks);
+        CORE_LOG("Client thread finished");
     });
 }
 
 void fd_cancel_client() {
+    CORE_LOG("fd_cancel_client() — blocking cancel");
     g_client_cancel_flag = true;
     if (g_client) {
         g_client->stop();
     }
     if (g_client_thread.joinable()) {
+        CORE_LOG("fd_cancel_client() — joining thread...");
         g_client_thread.join();
+        CORE_LOG("fd_cancel_client() — thread joined");
     }
     g_client.reset();
+}
+
+void fd_request_cancel_client() {
+    CORE_LOG("fd_request_cancel_client() — non-blocking cancel");
+    g_client_cancel_flag = true;
+    if (g_client) {
+        g_client->stop();
+    }
+    // Don't join — thread will exit on its own
 }
 
 } // extern "C"

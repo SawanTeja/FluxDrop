@@ -1,10 +1,8 @@
 #pragma once
 
 #include <gtk/gtk.h>
-#include <memory>
 #include <vector>
 #include <string>
-#include <thread>
 #include <atomic>
 
 namespace ui {
@@ -32,9 +30,7 @@ private:
     GtkWindow* parent_window_;
 
     std::vector<std::string> queued_files_;
-    std::thread server_thread_;
     std::atomic<bool> server_running_{false};
-    std::shared_ptr<std::atomic<bool>> cancel_flag_;
 
     void add_path(const std::string& path);
     void clear_files();

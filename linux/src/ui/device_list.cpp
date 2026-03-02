@@ -1,19 +1,20 @@
 #include "ui/device_list.hpp"
 #include "ui/transfer_dialog.hpp"
-#include "transfer.hpp"
-#include "security.hpp"
-#include "protocol/packet.hpp"
-#include "protocol/file_meta.hpp"
+#include "logger.hpp"
 #include <iostream>
 #include <thread>
 
 namespace ui {
+
+// ─── Generation counter — incremented on cancel to discard stale idle callbacks
+static std::atomic<uint64_t> g_recv_gen{0};
 
 // ─── Idle callback data structs ─────────────────────────────────────────────
 
 struct RecvStatusData {
     GtkWidget* label;
     std::string text;
+    uint64_t gen;
 };
 
 struct RecvProgressData {
@@ -21,17 +22,28 @@ struct RecvProgressData {
     GtkWidget* progress_label;
     double fraction;
     std::string text;
+    uint64_t gen;
 };
 
 struct RecvCompleteData {
     GtkWidget* status_label;
     GtkWidget* progress_bar;
     std::string message;
+    uint64_t gen;
 };
 
 struct AddRowData {
     GtkWidget* list_box;
     networking::DiscoveredDevice device;
+};
+
+struct RecvReenableData {
+    GtkWidget* cancel_button;
+    GtkWidget* progress_bar;
+    GtkWidget* status_label;
+    GtkWidget* progress_label;
+    std::string status_message;
+    uint64_t gen;
 };
 
 // ─── Connect button callback data ──────────────────────────────────────────
@@ -41,7 +53,6 @@ struct ConnectData {
     networking::DiscoveredDevice device;
     GtkWidget* entry;
     GtkWidget* pin_window;
-    GtkWidget* cancel_button;
     std::string save_dir;
 };
 
@@ -52,39 +63,56 @@ struct FileRequestData {
     std::promise<bool>* promise;
 };
 
-// ─── Static callbacks (extracted to avoid G_CALLBACK macro issues) ──────────
+// ─── Static context for C callbacks ─────────────────────────────────────────
+static DeviceListPanel* g_client_panel = nullptr;
+
+// ─── Idle callbacks (run on main thread) ────────────────────────────────────
 
 static gboolean update_recv_status_idle(gpointer data) {
     auto* d = static_cast<RecvStatusData*>(data);
-    if (GTK_IS_LABEL(d->label))
+    if (d->gen == g_recv_gen.load() && GTK_IS_LABEL(d->label)) {
         gtk_label_set_text(GTK_LABEL(d->label), d->text.c_str());
+    } else {
+        FD_WARN("Discarding stale recv status idle");
+    }
     delete d;
     return G_SOURCE_REMOVE;
 }
 
 static gboolean update_recv_progress_idle(gpointer data) {
     auto* d = static_cast<RecvProgressData*>(data);
-    if (GTK_IS_PROGRESS_BAR(d->progress_bar))
-        gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(d->progress_bar), d->fraction);
-    if (GTK_IS_LABEL(d->progress_label))
-        gtk_label_set_text(GTK_LABEL(d->progress_label), d->text.c_str());
+    if (d->gen == g_recv_gen.load()) {
+        if (GTK_IS_PROGRESS_BAR(d->progress_bar))
+            gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(d->progress_bar), d->fraction);
+        if (GTK_IS_LABEL(d->progress_label))
+            gtk_label_set_text(GTK_LABEL(d->progress_label), d->text.c_str());
+    }
     delete d;
     return G_SOURCE_REMOVE;
 }
 
 static gboolean recv_complete_idle(gpointer data) {
-    auto* d = static_cast<RecvCompleteData*>(data);
-    if (GTK_IS_LABEL(d->status_label))
-        gtk_label_set_text(GTK_LABEL(d->status_label), d->message.c_str());
-    if (GTK_IS_PROGRESS_BAR(d->progress_bar))
-        gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(d->progress_bar), 1.0);
+    auto* d = static_cast<RecvReenableData*>(data);
+    if (d->gen == g_recv_gen.load()) {
+        FD_LOG("Recv complete idle: " << d->status_message);
+        if (GTK_IS_LABEL(d->status_label))
+            gtk_label_set_text(GTK_LABEL(d->status_label), d->status_message.c_str());
+        if (GTK_IS_PROGRESS_BAR(d->progress_bar))
+            gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(d->progress_bar), 1.0);
+        if (GTK_IS_WIDGET(d->cancel_button))
+            gtk_widget_set_visible(d->cancel_button, FALSE);
+    } else {
+        FD_WARN("Discarding stale recv complete idle");
+    }
     delete d;
     return G_SOURCE_REMOVE;
 }
 
 static gboolean file_request_idle(gpointer data) {
     auto* d = static_cast<FileRequestData*>(data);
-    
+
+    FD_LOG("File request dialog for: " << d->filename);
+
     GtkWidget* dialog = gtk_window_new();
     gtk_window_set_title(GTK_WINDOW(dialog), "Incoming File");
     gtk_window_set_default_size(GTK_WINDOW(dialog), 350, 150);
@@ -110,7 +138,7 @@ static gboolean file_request_idle(gpointer data) {
 
     GtkWidget* reject_btn = gtk_button_new_with_label("Reject");
     gtk_widget_add_css_class(reject_btn, "destructive-action");
-    
+
     GtkWidget* accept_btn = gtk_button_new_with_label("Accept");
     gtk_widget_add_css_class(accept_btn, "suggested-action");
 
@@ -120,7 +148,6 @@ static gboolean file_request_idle(gpointer data) {
 
     gtk_window_set_child(GTK_WINDOW(dialog), vbox);
 
-    // Context for callbacks
     struct RespData {
         GtkWidget* win;
         std::promise<bool>* prom;
@@ -130,19 +157,31 @@ static gboolean file_request_idle(gpointer data) {
 
     g_signal_connect(accept_btn, "clicked", G_CALLBACK(+[](GtkButton*, gpointer user) {
         auto* rnd = static_cast<RespData*>(user);
-        if (!rnd->answered) { rnd->prom->set_value(true); rnd->answered = true; }
+        if (!rnd->answered) {
+            FD_LOG("File request: ACCEPTED");
+            rnd->prom->set_value(true);
+            rnd->answered = true;
+        }
         gtk_window_close(GTK_WINDOW(rnd->win));
     }), rd);
 
     g_signal_connect(reject_btn, "clicked", G_CALLBACK(+[](GtkButton*, gpointer user) {
         auto* rnd = static_cast<RespData*>(user);
-        if (!rnd->answered) { rnd->prom->set_value(false); rnd->answered = true; }
+        if (!rnd->answered) {
+            FD_LOG("File request: REJECTED");
+            rnd->prom->set_value(false);
+            rnd->answered = true;
+        }
         gtk_window_close(GTK_WINDOW(rnd->win));
     }), rd);
 
     g_signal_connect(dialog, "destroy", G_CALLBACK(+[](GtkWidget*, gpointer user) {
         auto* rnd = static_cast<RespData*>(user);
-        if (!rnd->answered) { rnd->prom->set_value(false); rnd->answered = true; }
+        if (!rnd->answered) {
+            FD_WARN("File request dialog destroyed without answer — rejecting");
+            rnd->prom->set_value(false);
+            rnd->answered = true;
+        }
         delete rnd;
     }), rd);
 
@@ -154,6 +193,8 @@ static gboolean file_request_idle(gpointer data) {
 static gboolean add_device_row_idle(gpointer d) {
     auto* data = static_cast<AddRowData*>(d);
     if (!GTK_IS_LIST_BOX(data->list_box)) { delete data; return G_SOURCE_REMOVE; }
+
+    FD_LOG("Adding device row: " << data->device.ip << ":" << data->device.port);
 
     GtkWidget* row_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
     gtk_widget_add_css_class(row_box, "device-row");
@@ -185,7 +226,6 @@ static gboolean add_device_row_idle(gpointer d) {
     gtk_widget_add_css_class(arrow, "title-text");
     gtk_box_append(GTK_BOX(row_box), arrow);
 
-    // Store device info on the row for later retrieval
     auto* dev_copy = new networking::DiscoveredDevice(data->device);
     auto destroy_fn = +[](gpointer p) { delete static_cast<networking::DiscoveredDevice*>(p); };
     g_object_set_data_full(G_OBJECT(row_box), "device", dev_copy, destroy_fn);
@@ -195,50 +235,68 @@ static gboolean add_device_row_idle(gpointer d) {
     return G_SOURCE_REMOVE;
 }
 
-// ─── Connect button clicked handler (extracted from lambda) ─────────────────
+// ─── Connect button clicked handler ─────────────────────────────────────────
 
 void on_connect_btn_clicked(GtkButton* /*btn*/, gpointer data) {
     auto* cd = static_cast<ConnectData*>(data);
     GtkEntryBuffer* buffer = gtk_entry_get_buffer(GTK_ENTRY(cd->entry));
     std::string pin = gtk_entry_buffer_get_text(buffer);
 
-    if (pin.empty()) return;
+    if (pin.empty()) {
+        FD_WARN("Connect clicked but PIN is empty");
+        return;
+    }
+
+    FD_LOG("Connecting to " << cd->device.ip << ":" << cd->device.port << " with PIN");
 
     gtk_window_close(GTK_WINDOW(cd->pin_window));
 
+    // Increment generation for this transfer session
+    g_recv_gen++;
+    uint64_t gen = g_recv_gen.load();
+
     cd->panel->transferring_ = true;
-    cd->panel->cancel_flag_ = std::make_shared<std::atomic<bool>>(false);
     gtk_widget_set_visible(cd->panel->progress_bar_, TRUE);
     gtk_widget_set_visible(cd->panel->cancel_button_, TRUE);
+    gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(cd->panel->progress_bar_), 0.0);
+    gtk_label_set_text(GTK_LABEL(cd->panel->status_label_), "Connecting...");
+    gtk_label_set_text(GTK_LABEL(cd->panel->progress_label_), "");
 
-    GtkWidget* status_lbl = cd->panel->status_label_;
-    GtkWidget* progress_br = cd->panel->progress_bar_;
-    GtkWidget* progress_lbl = cd->panel->progress_label_;
-    GtkWidget* cancel_btn = cd->panel->cancel_button_;
-    auto* transferring = &cd->panel->transferring_;
-    GtkWindow* parent_win = cd->panel->parent_window_;
-
-    // Storing panel state globally for callbacks (hacky but functional for this scope)
-    static DeviceListPanel* g_client_panel = cd->panel;
+    // Update static context
     g_client_panel = cd->panel;
 
     auto status_cb = [](const char* msg) {
-        g_idle_add(update_recv_status_idle, new RecvStatusData{g_client_panel->status_label_, msg});
+        FD_LOG("Client status: " << msg);
+        uint64_t gen = g_recv_gen.load();
+        g_idle_add(update_recv_status_idle, new RecvStatusData{g_client_panel->status_label_, msg, gen});
     };
 
     auto error_cb = [](const char* err) {
+        FD_ERR("Client error: " << err);
+        uint64_t gen = g_recv_gen.load();
         g_client_panel->transferring_ = false;
-        g_idle_add(+[](gpointer ptr) -> gboolean {
-            gtk_widget_set_visible(static_cast<GtkWidget*>(ptr), FALSE);
-            return G_SOURCE_REMOVE;
-        }, g_client_panel->cancel_button_);
-        g_idle_add(recv_complete_idle, new RecvCompleteData{g_client_panel->status_label_, g_client_panel->progress_bar_, "❌ " + std::string(err)});
+        g_idle_add(recv_complete_idle, new RecvReenableData{
+            g_client_panel->cancel_button_, g_client_panel->progress_bar_,
+            g_client_panel->status_label_, g_client_panel->progress_label_,
+            "❌ " + std::string(err), gen
+        });
     };
 
     auto file_request_cb = [](const char* filename, uint64_t size) -> bool {
+        FD_LOG("File request: " << filename << " (" << size << " bytes)");
         std::promise<bool> prom;
         auto fut = prom.get_future();
-        g_idle_add(file_request_idle, new FileRequestData{g_client_panel->parent_window_, filename, size, &prom});
+        g_idle_add(file_request_idle, new FileRequestData{
+            g_client_panel->parent_window_, filename, size, &prom
+        });
+        // Wait with periodic timeout so cancellation can unblock us
+        while (fut.wait_for(std::chrono::milliseconds(200)) != std::future_status::ready) {
+            // If we've been cancelled, reject and return
+            if (!g_client_panel->transferring_) {
+                FD_WARN("File request interrupted by cancel — rejecting");
+                return false;
+            }
+        }
         return fut.get();
     };
 
@@ -247,22 +305,27 @@ void on_connect_btn_clicked(GtkButton* /*btn*/, gpointer data) {
         int pct = static_cast<int>(frac * 100);
         char buf[128];
         snprintf(buf, sizeof(buf), "%d%% — %.1f MB/s — %s", pct, speed, filename);
-        g_idle_add(update_recv_progress_idle, new RecvProgressData{g_client_panel->progress_bar_, g_client_panel->progress_label_, frac, std::string(buf)});
+        uint64_t gen = g_recv_gen.load();
+        g_idle_add(update_recv_progress_idle, new RecvProgressData{
+            g_client_panel->progress_bar_, g_client_panel->progress_label_, frac, std::string(buf), gen
+        });
     };
 
     auto complete_cb = []() {
+        FD_LOG("Client transfer complete");
+        uint64_t gen = g_recv_gen.load();
         g_client_panel->transferring_ = false;
-        g_idle_add(+[](gpointer ptr) -> gboolean {
-            gtk_widget_set_visible(static_cast<GtkWidget*>(ptr), FALSE);
-            return G_SOURCE_REMOVE;
-        }, g_client_panel->cancel_button_);
-        g_idle_add(recv_complete_idle, new RecvCompleteData{g_client_panel->status_label_, g_client_panel->progress_bar_, "✅ All files received!"});
+        g_idle_add(recv_complete_idle, new RecvReenableData{
+            g_client_panel->cancel_button_, g_client_panel->progress_bar_,
+            g_client_panel->status_label_, g_client_panel->progress_label_,
+            "✅ All files received!", gen
+        });
     };
 
     auto dev = cd->device;
     auto pin_copy = pin;
     auto save_dir_copy = cd->save_dir;
-    
+
     fd_connect(dev.ip.c_str(), dev.port, pin_copy.c_str(), save_dir_copy.c_str(),
                status_cb, error_cb, file_request_cb, progress_cb, complete_cb);
 
@@ -273,6 +336,8 @@ void on_connect_btn_clicked(GtkButton* /*btn*/, gpointer data) {
 
 DeviceListPanel::DeviceListPanel(GtkWindow* parent_window)
     : parent_window_(parent_window) {
+
+    FD_LOG("DeviceListPanel created");
 
     panel_ = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
     gtk_widget_set_margin_start(panel_, 12);
@@ -291,8 +356,7 @@ DeviceListPanel::DeviceListPanel(GtkWindow* parent_window)
     gtk_label_set_xalign(GTK_LABEL(info_label_), 0.0);
     gtk_box_append(GTK_BOX(panel_), info_label_);
 
-    // ─── Save folder picker ────────────────────────────────────────────────
-    // Default save dir: ~/Downloads or home
+    // ─── Save folder picker ─────────────────────────────────────────────
     const char* home = g_get_home_dir();
     std::string downloads = std::string(home) + "/Downloads";
     if (g_file_test(downloads.c_str(), G_FILE_TEST_IS_DIR)) {
@@ -333,6 +397,7 @@ G_GNUC_BEGIN_IGNORE_DEPRECATIONS
                     if (path) {
                         panel->save_dir_ = path;
                         gtk_label_set_text(GTK_LABEL(panel->save_label_), path);
+                        FD_LOG("Save directory changed to: " << path);
                         g_free(path);
                     }
                     g_object_unref(folder);
@@ -376,14 +441,25 @@ G_GNUC_END_IGNORE_DEPRECATIONS
     gtk_widget_add_css_class(progress_label_, "status-text");
     gtk_box_append(GTK_BOX(section), progress_label_);
 
-    cancel_button_ = gtk_button_new_with_label("Pause / Cancel");
+    cancel_button_ = gtk_button_new_with_label("⏹ Cancel Transfer");
     gtk_widget_add_css_class(cancel_button_, "destructive-action");
     gtk_widget_set_visible(cancel_button_, FALSE);
-    g_signal_connect(cancel_button_, "clicked", G_CALLBACK(+[](GtkButton* /*btn*/, gpointer data) {
+    g_signal_connect(cancel_button_, "clicked", G_CALLBACK(+[](GtkButton* /*btn*/, gpointer data) -> void {
         auto* self = static_cast<DeviceListPanel*>(data);
-        if (self->cancel_flag_) {
-            self->cancel_flag_->store(true);
-        }
+        FD_LOG("Cancel transfer button clicked — non-blocking cancel");
+
+        // Increment generation to invalidate stale callbacks
+        g_recv_gen++;
+        self->transferring_ = false;
+
+        // Non-blocking cancel — signals stop, closes socket, thread exits on its own
+        fd_request_cancel_client();
+
+        // Reset UI immediately
+        gtk_widget_set_visible(self->cancel_button_, FALSE);
+        gtk_widget_set_visible(self->progress_bar_, FALSE);
+        gtk_label_set_text(GTK_LABEL(self->status_label_), "Transfer cancelled.");
+        gtk_label_set_text(GTK_LABEL(self->progress_label_), "");
     }), this);
     gtk_box_append(GTK_BOX(section), cancel_button_);
 
@@ -391,12 +467,21 @@ G_GNUC_END_IGNORE_DEPRECATIONS
 }
 
 DeviceListPanel::~DeviceListPanel() {
+    FD_LOG("~DeviceListPanel — cleaning up");
+    g_recv_gen++;  // Invalidate pending idles
     stop_discovery();
+    if (transferring_) {
+        FD_LOG("~DeviceListPanel — cancelling active transfer (blocking)");
+        fd_cancel_client();
+        transferring_ = false;
+    }
+    FD_LOG("~DeviceListPanel — done");
 }
 
 #include "fluxdrop_core.h"
 
 void DeviceListPanel::start_discovery() {
+    FD_LOG("Starting device discovery");
     static DeviceListPanel* g_panel;
     g_panel = this;
     fd_start_discovery(482913, [](const fd_device_t* dev) {
@@ -410,6 +495,7 @@ void DeviceListPanel::start_discovery() {
 }
 
 void DeviceListPanel::stop_discovery() {
+    FD_LOG("Stopping device discovery");
     fd_stop_discovery();
 }
 
@@ -417,16 +503,20 @@ void DeviceListPanel::on_device_found(const networking::DiscoveredDevice& device
     std::string key = device.ip + ":" + std::to_string(device.port);
     {
         std::lock_guard<std::mutex> lock(devices_mutex_);
-        if (devices_.count(key)) return; // Already known
+        if (devices_.count(key)) return;
         devices_[key] = device;
     }
 
+    FD_LOG("Device found: " << key);
     g_idle_add(add_device_row_idle, new AddRowData{list_box_, device});
 }
 
 void DeviceListPanel::row_activated_cb(GtkListBox* /*list_box*/, GtkListBoxRow* row, gpointer user_data) {
     auto* self = static_cast<DeviceListPanel*>(user_data);
-    if (self->transferring_) return;
+    if (self->transferring_) {
+        FD_WARN("Row activated but transfer already in progress");
+        return;
+    }
 
     GtkWidget* child = gtk_list_box_row_get_child(row);
     if (!child) return;
@@ -435,10 +525,13 @@ void DeviceListPanel::row_activated_cb(GtkListBox* /*list_box*/, GtkListBoxRow* 
         g_object_get_data(G_OBJECT(child), "device"));
     if (!device) return;
 
+    FD_LOG("Device selected: " << device->ip << ":" << device->port);
     self->connect_to_device(*device);
 }
 
 void DeviceListPanel::connect_to_device(const networking::DiscoveredDevice& device) {
+    FD_LOG("Opening PIN dialog for " << device.ip);
+
     GtkWidget* pin_window = gtk_window_new();
     gtk_window_set_title(GTK_WINDOW(pin_window), "Enter PIN");
     gtk_window_set_default_size(GTK_WINDOW(pin_window), 320, 180);
@@ -466,7 +559,7 @@ void DeviceListPanel::connect_to_device(const networking::DiscoveredDevice& devi
 
     gtk_window_set_child(GTK_WINDOW(pin_window), vbox);
 
-    auto* cd = new ConnectData{this, device, entry, pin_window, nullptr, save_dir_};
+    auto* cd = new ConnectData{this, device, entry, pin_window, save_dir_};
     g_signal_connect(connect_btn, "clicked", G_CALLBACK(on_connect_btn_clicked), cd);
 
     gtk_window_present(GTK_WINDOW(pin_window));

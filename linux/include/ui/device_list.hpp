@@ -35,7 +35,6 @@ private:
     std::map<std::string, networking::DiscoveredDevice> devices_;
     std::mutex devices_mutex_;
     std::atomic<bool> transferring_{false};
-    std::shared_ptr<std::atomic<bool>> cancel_flag_;
 
     GtkWidget* cancel_button_;
 

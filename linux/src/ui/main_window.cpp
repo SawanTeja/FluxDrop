@@ -1,6 +1,7 @@
 #include "ui/main_window.hpp"
 #include "ui/file_sender.hpp"
 #include "ui/device_list.hpp"
+#include "logger.hpp"
 #include <iostream>
 
 namespace ui {
@@ -181,11 +182,13 @@ void MainWindow::setup_css() {
 }
 
 void MainWindow::on_destroy(GtkWidget* widget, gpointer data) {
+    FD_LOG("MainWindow::on_destroy — cleaning up");
     auto* self = static_cast<MainWindow*>(data);
     if (self->receive_panel_) {
         self->receive_panel_->stop_discovery();
     }
     delete self;
+    FD_LOG("MainWindow::on_destroy — done");
 }
 
 MainWindow::MainWindow(GtkApplication* app) {
@@ -232,8 +235,11 @@ MainWindow::MainWindow(GtkApplication* app) {
 }
 
 MainWindow::~MainWindow() {
+    FD_LOG("~MainWindow — deleting panels");
     delete send_panel_;
+    send_panel_ = nullptr;
     delete receive_panel_;
+    receive_panel_ = nullptr;
 }
 
 static void activate_callback(GtkApplication* app, gpointer /*user_data*/) {
