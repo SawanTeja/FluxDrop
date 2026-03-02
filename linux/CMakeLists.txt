@@ -32,7 +32,7 @@ target_include_directories(fluxdrop_gui PRIVATE
 
 # Link against the pre-built core library and its transitive dependencies
 target_link_libraries(fluxdrop_gui PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/libfluxdrop_core.a
+    ${CMAKE_CURRENT_SOURCE_DIR}/../build/libfluxdrop_core.a
     ${GTK4_LIBRARIES}
     Threads::Threads
     nlohmann_json::nlohmann_json
