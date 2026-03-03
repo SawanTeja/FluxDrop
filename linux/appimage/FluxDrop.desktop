@@ -5,3 +5,4 @@ Icon=fluxdroplogo
 Type=Application
 Categories=Network;FileTransfer;GTK;
 Comment=Fast local file transfer
+StartupWMClass=dev.fluxdrop.app

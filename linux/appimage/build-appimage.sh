@@ -77,13 +77,19 @@ cp "${REPO_ROOT}/linux/build/fluxdrop_gui" "${APPDIR}/usr/bin/"
 # Desktop file & icon
 cp "${REPO_ROOT}/linux/appimage/FluxDrop.desktop" "${APPDIR}/usr/share/applications/"
 cp "${REPO_ROOT}/linux/appimage/FluxDrop.desktop" "${APPDIR}/"
-convert "${REPO_ROOT}/linux/assets/fluxdroplogo.png" -resize 256x256 \
-    "${APPDIR}/usr/share/icons/hicolor/256x256/apps/fluxdroplogo.png"
-mkdir -p "${APPDIR}/usr/share/icons/hicolor/128x128/apps"
-convert "${REPO_ROOT}/linux/assets/fluxdroplogo.png" -resize 128x128 \
-    "${APPDIR}/usr/share/icons/hicolor/128x128/apps/fluxdroplogo.png"
+
+# Install icons at multiple sizes, with both "fluxdroplogo" and app-id names
+for SIZE in 48 128 256; do
+    mkdir -p "${APPDIR}/usr/share/icons/hicolor/${SIZE}x${SIZE}/apps"
+    convert "${REPO_ROOT}/linux/assets/fluxdroplogo.png" -resize "${SIZE}x${SIZE}" \
+        "${APPDIR}/usr/share/icons/hicolor/${SIZE}x${SIZE}/apps/fluxdroplogo.png"
+    # GNOME dock looks up icons by app-id (dev.fluxdrop.app)
+    cp "${APPDIR}/usr/share/icons/hicolor/${SIZE}x${SIZE}/apps/fluxdroplogo.png" \
+       "${APPDIR}/usr/share/icons/hicolor/${SIZE}x${SIZE}/apps/dev.fluxdrop.app.png"
+done
+
 cp "${APPDIR}/usr/share/icons/hicolor/256x256/apps/fluxdroplogo.png" "${APPDIR}/fluxdroplogo.png"
-# .DirIcon is what file managers and docks use to show the AppImage icon
+# .DirIcon is what file managers use to show the AppImage icon
 ln -sf fluxdroplogo.png "${APPDIR}/.DirIcon"
 
 # App assets — next to binary so relative "assets/" path works
