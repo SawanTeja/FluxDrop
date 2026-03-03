@@ -22,8 +22,16 @@ import dev.fluxdrop.app.bridge.ClientCallbacks
 import dev.fluxdrop.app.ui.components.TransferProgress
 import dev.fluxdrop.app.ui.components.TransferState
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 data class DiscoveredDevice(val ip: String, val port: Int, val sessionId: Long)
+
+data class IncomingFileRequest(
+    val filename: String,
+    val fileSize: Long,
+    val onResponse: (Boolean) -> Unit
+)
 
 private const val PREFS_NAME = "fluxdrop_prefs"
 private const val KEY_SAVE_DIR = "receive_save_dir"
@@ -41,6 +49,7 @@ fun ReceiveScreen(modifier: Modifier = Modifier) {
     var pin by remember { mutableStateOf("") }
     var transferState by remember { mutableStateOf(TransferState()) }
     var saveDir by remember { mutableStateOf(prefs.getString(KEY_SAVE_DIR, defaultDir) ?: defaultDir) }
+    var incomingRequest by remember { mutableStateOf<IncomingFileRequest?>(null) }
 
     var manualIp by remember { mutableStateOf("") }
     var manualPort by remember { mutableStateOf("") }
@@ -88,6 +97,41 @@ fun ReceiveScreen(modifier: Modifier = Modifier) {
             FluxDropCore.stopDiscovery()
             FluxDropCore.requestCancelClient()
         }
+    }
+
+    if (incomingRequest != null) {
+        AlertDialog(
+            onDismissRequest = {
+                // Ignore tapping outside - user must explicitly Accept or Reject
+            },
+            title = {
+                Text(text = "Incoming File")
+            },
+            text = {
+                val sizeMb = incomingRequest!!.fileSize.toFloat() / (1024f * 1024f)
+                Text("Accept incoming file?\n\n${incomingRequest!!.filename}\n${"%.1f".format(sizeMb)} MB")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        incomingRequest?.onResponse?.invoke(true)
+                        incomingRequest = null
+                    }
+                ) {
+                    Text("Accept")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = {
+                        incomingRequest?.onResponse?.invoke(false)
+                        incomingRequest = null
+                    }
+                ) {
+                    Text("Reject")
+                }
+            }
+        )
     }
 
     Column(
@@ -240,7 +284,27 @@ fun ReceiveScreen(modifier: Modifier = Modifier) {
                     FluxDropCore.connect(selectedDevice!!.ip, selectedDevice!!.port, pin, saveDir, object : ClientCallbacks {
                         override fun onStatus(message: String) { status = message }
                         override fun onError(error: String) { status = "Error: $error" }
-                        override fun onFileRequest(filename: String, fileSize: Long): Boolean = true
+                        override fun onFileRequest(filename: String, fileSize: Long): Boolean {
+                            val latch = CountDownLatch(1)
+                            var accepted = false
+                            
+                            incomingRequest = IncomingFileRequest(filename, fileSize) { response ->
+                                accepted = response
+                                latch.countDown()
+                            }
+                            
+                            try {
+                                while (latch.count > 0 && selectedDevice != null) {
+                                    latch.await(200, TimeUnit.MILLISECONDS)
+                                }
+                                if (selectedDevice == null) {
+                                    return false
+                                }
+                            } catch (e: InterruptedException) {
+                                return false
+                            }
+                            return accepted
+                        }
                         override fun onProgress(filename: String, transferred: Long, total: Long, speedMbps: Double) {
                             transferState = TransferState(
                                 progress = if (total > 0) transferred.toFloat() / total.toFloat() else 0f,
@@ -271,6 +335,7 @@ fun ReceiveScreen(modifier: Modifier = Modifier) {
                     status = "Scanning for devices..."
                     pin = ""
                     transferState = TransferState()
+                    incomingRequest = null
                 }) {
                     Text("Cancel")
                 }
