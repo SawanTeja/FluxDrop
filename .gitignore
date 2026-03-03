@@ -31,10 +31,16 @@ android/app/.cxx/
 # Third-party sources & tarballs (fetched at build time)
 android/app/src/main/cpp/third_party/libsodium-*.tar.gz
 android/app/src/main/cpp/third_party/boost.tar.gz
-android/app/src/main/cpp/third_party/libsodium/build/
-android/app/src/main/cpp/third_party/boost/build/
+android/app/src/main/cpp/third_party/libsodium/
+android/app/src/main/cpp/third_party/boost/
+
 
 # Signing configs
 android/*.jks
 android/*.keystore
 android/keystore.properties
+
+android/.gradle/buildOutputCleanup/buildOutputCleanup.lock
+android/.gradle/buildOutputCleanup/outputFiles.bin
+
+/home/sawan/FluxDrop/android/.gradle
