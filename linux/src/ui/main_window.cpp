@@ -201,6 +201,10 @@ MainWindow::MainWindow(GtkApplication* app) {
     header_bar_ = gtk_header_bar_new();
     gtk_window_set_titlebar(GTK_WINDOW(window_), header_bar_);
 
+    GtkWidget* logo_image = gtk_image_new_from_file("assets/fluxdroplogo.png");
+    gtk_widget_set_size_request(logo_image, 32, 32);
+    gtk_header_bar_pack_start(GTK_HEADER_BAR(header_bar_), logo_image);
+
     GtkWidget* title_label = gtk_label_new("FluxDrop");
     gtk_widget_add_css_class(title_label, "title-text");
     gtk_header_bar_set_title_widget(GTK_HEADER_BAR(header_bar_), title_label);

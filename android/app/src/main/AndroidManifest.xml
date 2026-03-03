@@ -20,6 +20,8 @@
     <application
         android:allowBackup="true"
         android:label="FluxDrop"
+        android:icon="@drawable/fluxdroplogo"
+        android:roundIcon="@drawable/fluxdroplogo"
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
         android:requestLegacyExternalStorage="true">

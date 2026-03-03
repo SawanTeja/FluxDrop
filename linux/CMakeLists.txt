@@ -41,3 +41,10 @@ target_link_libraries(fluxdrop_gui PRIVATE
 )
 
 target_compile_options(fluxdrop_gui PRIVATE ${GTK4_CFLAGS_OTHER})
+
+# Copy assets to build directory so the executable can find them
+add_custom_command(TARGET fluxdrop_gui POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets
+    $<TARGET_FILE_DIR:fluxdrop_gui>/assets
+)

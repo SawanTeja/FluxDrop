@@ -12,6 +12,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -81,11 +83,25 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FluxDropApp() {
     var currentScreen by remember { mutableStateOf("send") }
 
     Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text("FluxDrop") },
+                navigationIcon = {
+                    Icon(
+                        painter = androidx.compose.ui.res.painterResource(id = R.drawable.fluxdroplogo),
+                        contentDescription = "App Logo",
+                        modifier = Modifier.padding(start = 16.dp).size(40.dp),
+                        tint = androidx.compose.ui.graphics.Color.Unspecified
+                    )
+                }
+            )
+        },
         bottomBar = {
             NavigationBar {
                 NavigationBarItem(
