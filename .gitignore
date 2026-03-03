@@ -6,7 +6,6 @@ libfluxdrop_core.dylib
 libfluxdrop_core.lib
 libfluxdrop_core.dll
 libfluxdrop_core.dylib
-fluxdrop
 libfluxdrop_core.a
 connect.txt
 connect.log
