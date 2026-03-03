@@ -28,10 +28,11 @@ android/local.properties
 android/app/.cxx/
 
 # Third-party sources & tarballs (fetched at build time)
-android/app/src/main/cpp/third_party/libsodium/
+# Third-party sources & tarballs (fetched at build time)
 android/app/src/main/cpp/third_party/libsodium-*.tar.gz
-android/app/src/main/cpp/third_party/boost/
 android/app/src/main/cpp/third_party/boost.tar.gz
+android/app/src/main/cpp/third_party/libsodium/build/
+android/app/src/main/cpp/third_party/boost/build/
 
 # Signing configs
 android/*.jks
