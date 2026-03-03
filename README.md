@@ -63,44 +63,7 @@ FluxDrop/
 ├── CMakeLists.txt            # Root CMake (CLI build)
 ├── TESTING.md                # Full test suite documentation
 └── README.md                 # Project documentation
-
-### Architecture
-
-```mermaid
-flowchart TD
-    subgraph Frontend["Frontend Layer"]
-        CLI["CLI<br>(main.cpp)"]
-        Linux["Linux GTK4<br>(linux/src/ui)"]
-        Android["Android Compose<br>(android/app/src)"]
-    end
-
-    subgraph Core["Core Engine (C API)"]
-        API["include/fluxdrop_core.h<br>src/core_api.cpp"]
-    end
-
-    subgraph Modules["Implementation Modules"]
-        Networking["networking.cpp<br>Server / Client<br>UDP discovery"]
-        Transfer["transfer.cpp<br>Send / Receive<br>Chunked I/O<br>Resume support"]
-        Security["security.cpp<br>PIN gen / hash<br>via libsodium"]
-    end
-
-    subgraph Protocol["Protocol Layer"]
-        Packet["protocol/packet.hpp + packet.cpp<br>16-byte binary headers<br>FILE_META, FILE_CHUNK, AUTH..."]
-    end
-
-    CLI --> API
-    Linux --> API
-    Android -- JNI bridge --> API
-    
-    API --> Networking
-    API --> Transfer
-    API --> Security
-    
-    Networking --> Protocol
-    Transfer --> Protocol
 ```
-
----
 
 ## Core Engine API
 

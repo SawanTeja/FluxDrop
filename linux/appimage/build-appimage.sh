@@ -79,7 +79,12 @@ cp "${REPO_ROOT}/linux/appimage/FluxDrop.desktop" "${APPDIR}/usr/share/applicati
 cp "${REPO_ROOT}/linux/appimage/FluxDrop.desktop" "${APPDIR}/"
 convert "${REPO_ROOT}/linux/assets/fluxdroplogo.png" -resize 256x256 \
     "${APPDIR}/usr/share/icons/hicolor/256x256/apps/fluxdroplogo.png"
+mkdir -p "${APPDIR}/usr/share/icons/hicolor/128x128/apps"
+convert "${REPO_ROOT}/linux/assets/fluxdroplogo.png" -resize 128x128 \
+    "${APPDIR}/usr/share/icons/hicolor/128x128/apps/fluxdroplogo.png"
 cp "${APPDIR}/usr/share/icons/hicolor/256x256/apps/fluxdroplogo.png" "${APPDIR}/fluxdroplogo.png"
+# .DirIcon is what file managers and docks use to show the AppImage icon
+ln -sf fluxdroplogo.png "${APPDIR}/.DirIcon"
 
 # App assets — next to binary so relative "assets/" path works
 cp -r "${REPO_ROOT}/linux/assets" "${APPDIR}/usr/bin/assets"
