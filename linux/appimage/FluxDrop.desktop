@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=FluxDrop
+Exec=fluxdrop_gui
+Icon=fluxdroplogo
+Type=Application
+Categories=Network;FileTransfer;GTK;
+Comment=Fast local file transfer

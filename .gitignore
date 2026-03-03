@@ -44,3 +44,12 @@ android/.gradle/buildOutputCleanup/buildOutputCleanup.lock
 android/.gradle/buildOutputCleanup/outputFiles.bin
 
 /home/sawan/FluxDrop/android/.gradle
+
+# ── AppImage ──────────────────────────────────────
+FluxDrop.AppDir/
+squashfs-root/
+*.AppImage
+appimagetool-x86_64.AppImage
+linuxdeploy-x86_64.AppImage
+linuxdeploy-plugin-gtk.sh
+linux/build/
