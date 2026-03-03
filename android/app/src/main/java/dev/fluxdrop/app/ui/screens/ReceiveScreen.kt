@@ -42,6 +42,10 @@ fun ReceiveScreen(modifier: Modifier = Modifier) {
     var transferState by remember { mutableStateOf(TransferState()) }
     var saveDir by remember { mutableStateOf(prefs.getString(KEY_SAVE_DIR, defaultDir) ?: defaultDir) }
 
+    var manualIp by remember { mutableStateOf("") }
+    var manualPort by remember { mutableStateOf("") }
+    var showManualConnect by remember { mutableStateOf(false) }
+
     // Folder picker launcher
     val folderPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
@@ -127,7 +131,7 @@ fun ReceiveScreen(modifier: Modifier = Modifier) {
             Text("Status: $status")
             Spacer(modifier = Modifier.height(16.dp))
             
-            LazyColumn {
+            LazyColumn(modifier = Modifier.weight(1f)) {
                 items(devices) { device ->
                     Card(
                         modifier = Modifier
@@ -139,6 +143,70 @@ fun ReceiveScreen(modifier: Modifier = Modifier) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text("Device at ${device.ip}", style = MaterialTheme.typography.titleMedium)
                             Text("Port: ${device.port}", style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+            }
+
+            // ── Manual "Connect by IP" fallback ──
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                "💡 Can't find your device?",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+
+            if (!showManualConnect) {
+                OutlinedButton(onClick = { showManualConnect = true }) {
+                    Text("🔗 Connect by IP")
+                }
+            } else {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        OutlinedTextField(
+                            value = manualIp,
+                            onValueChange = { manualIp = it },
+                            label = { Text("IP address") },
+                            placeholder = { Text("e.g. 192.168.43.1") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = manualPort,
+                            onValueChange = { manualPort = it },
+                            label = { Text("Port") },
+                            placeholder = { Text("Shown on sender") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row {
+                            Button(
+                                onClick = {
+                                    val port = manualPort.toIntOrNull() ?: 0
+                                    if (manualIp.isNotBlank() && port > 0) {
+                                        selectedDevice = DiscoveredDevice(manualIp, port, 0L)
+                                    }
+                                },
+                                enabled = manualIp.isNotBlank() && (manualPort.toIntOrNull() ?: 0) > 0
+                            ) {
+                                Text("Connect")
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            OutlinedButton(onClick = {
+                                showManualConnect = false
+                                manualIp = ""
+                                manualPort = ""
+                            }) {
+                                Text("Cancel")
+                            }
                         }
                     }
                 }

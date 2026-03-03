@@ -122,11 +122,14 @@ void Server::start(std::queue<TransferJob> jobs) {
                 boost::asio::ip::udp::socket udp_socket(udp_io_context, boost::asio::ip::udp::endpoint(boost::asio::ip::udp::v4(), 0));
                 udp_socket.set_option(boost::asio::socket_base::broadcast(true));
                 
-                boost::asio::ip::udp::endpoint broadcast_endpoint(boost::asio::ip::address_v4::broadcast(), 45454);
+                boost::asio::ip::udp::endpoint broadcast_endpoint(boost::asio::ip::address_v4::broadcast(), DISCOVERY_PORT);
+                boost::asio::ip::udp::endpoint multicast_endpoint(
+                    boost::asio::ip::make_address(MULTICAST_GROUP), DISCOVERY_PORT);
                 
                 while (running) {
                     std::string message = "FLUXDROP|" + std::to_string(session_id) + "|" + std::to_string(port) + "|" + get_instance_id();
                     udp_socket.send_to(boost::asio::buffer(message), broadcast_endpoint);
+                    udp_socket.send_to(boost::asio::buffer(message), multicast_endpoint);
                     std::this_thread::sleep_for(std::chrono::seconds(1));
                 }
             } catch (...) {}
@@ -218,8 +221,11 @@ void Server::start(std::queue<TransferJob> jobs) {
 void Client::join(uint32_t room_id) {
     try {
         boost::asio::io_context io_context;
-        boost::asio::ip::udp::socket socket(io_context, boost::asio::ip::udp::endpoint(boost::asio::ip::udp::v4(), 45454));
+        boost::asio::ip::udp::socket socket(io_context, boost::asio::ip::udp::endpoint(boost::asio::ip::udp::v4(), DISCOVERY_PORT));
         socket.set_option(boost::asio::socket_base::reuse_address(true));
+        // Join multicast group for hotspot discovery
+        socket.set_option(boost::asio::ip::multicast::join_group(
+            boost::asio::ip::make_address(MULTICAST_GROUP)));
         
         std::cout << "Scanning for room " << room_id << " broadcasts...\n";
         
@@ -413,8 +419,11 @@ void DiscoveryListener::start(DeviceFoundCallback callback) {
         try {
             boost::asio::io_context io_context;
             boost::asio::ip::udp::socket socket(io_context,
-                boost::asio::ip::udp::endpoint(boost::asio::ip::udp::v4(), 45454));
+                boost::asio::ip::udp::endpoint(boost::asio::ip::udp::v4(), DISCOVERY_PORT));
             socket.set_option(boost::asio::socket_base::reuse_address(true));
+            // Join multicast group for hotspot discovery
+            socket.set_option(boost::asio::ip::multicast::join_group(
+                boost::asio::ip::make_address(MULTICAST_GROUP)));
 
             // Get local IP to filter out own broadcasts
             std::string local_ip = get_local_ip(io_context);
@@ -513,11 +522,14 @@ void Server::start_gui(std::queue<TransferJob> jobs, ServerCallbacks callbacks) 
                     boost::asio::ip::udp::endpoint(boost::asio::ip::udp::v4(), 0));
                 udp_socket.set_option(boost::asio::socket_base::broadcast(true));
                 boost::asio::ip::udp::endpoint broadcast_ep(
-                    boost::asio::ip::address_v4::broadcast(), 45454);
+                    boost::asio::ip::address_v4::broadcast(), DISCOVERY_PORT);
+                boost::asio::ip::udp::endpoint multicast_ep(
+                    boost::asio::ip::make_address(MULTICAST_GROUP), DISCOVERY_PORT);
 
                 while (broadcasting) {
                     std::string msg = "FLUXDROP|" + std::to_string(session_id) + "|" + std::to_string(port) + "|" + get_instance_id();
                     udp_socket.send_to(boost::asio::buffer(msg), broadcast_ep);
+                    udp_socket.send_to(boost::asio::buffer(msg), multicast_ep);
                     std::this_thread::sleep_for(std::chrono::seconds(1));
                 }
             } catch (...) {}

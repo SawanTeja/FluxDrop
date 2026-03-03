@@ -11,6 +11,10 @@
 
 namespace networking {
 
+// Multicast group for device discovery (works across hotspot networks)
+constexpr const char* MULTICAST_GROUP = "239.255.45.45";
+constexpr unsigned short DISCOVERY_PORT = 45454;
+
 struct TransferJob {
     std::string filepath;
     std::string filename;

@@ -30,6 +30,7 @@ fun SendScreen(modifier: Modifier = Modifier) {
     var pin by remember { mutableStateOf("") }
     var status by remember { mutableStateOf("Ready to send") }
     var transferState by remember { mutableStateOf(TransferState()) }
+    var isSharing by remember { mutableStateOf(false) }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) {
@@ -56,7 +57,10 @@ fun SendScreen(modifier: Modifier = Modifier) {
             Spacer(modifier = Modifier.height(16.dp))
         }
 
-        Button(onClick = { picker.launch(arrayOf("*/*")) }) {
+        Button(
+            onClick = { picker.launch(arrayOf("*/*")) },
+            enabled = !isSharing
+        ) {
             Text("Select Files")
         }
 
@@ -65,8 +69,10 @@ fun SendScreen(modifier: Modifier = Modifier) {
         if (selectedFiles.isNotEmpty()) {
             Text("${selectedFiles.size} files selected")
             Spacer(modifier = Modifier.height(16.dp))
-            Button(onClick = {
+            Button(
+                onClick = {
                 coroutineScope.launch {
+                    isSharing = true
                     status = "Processing files..."
                     val paths = withContext(Dispatchers.IO) {
                         try {
@@ -79,6 +85,7 @@ fun SendScreen(modifier: Modifier = Modifier) {
                     }
                     if (paths.isEmpty()) {
                         status = "Failed to copy files."
+                        isSharing = false
                         return@launch
                     }
                     status = "Starting server..."
@@ -88,7 +95,10 @@ fun SendScreen(modifier: Modifier = Modifier) {
                             status = "Waiting for receiver on $ip:$port"
                         }
                         override fun onStatus(message: String) { status = message }
-                        override fun onError(error: String) { status = "Error: $error" }
+                        override fun onError(error: String) {
+                            status = "Error: $error"
+                            isSharing = false
+                        }
                         override fun onProgress(filename: String, transferred: Long, total: Long, speedMbps: Double) {
                             transferState = TransferState(
                                 progress = if (total > 0) transferred.toFloat() / total.toFloat() else 0f,
@@ -105,21 +115,27 @@ fun SendScreen(modifier: Modifier = Modifier) {
                                 progress = 1f,
                                 status = "All files transferred!"
                             )
+                            isSharing = false
                         }
                     })
                 }
-            }) {
-                Text("Start Sharing")
+                },
+                enabled = !isSharing
+            ) {
+                Text(if (isSharing) "Sharing..." else "Start Sharing")
             }
             
             Spacer(modifier = Modifier.height(8.dp))
-            Button(onClick = {
-                FluxDropCore.requestCancelServer()
-                status = "Cancelled"
-                pin = ""
-                transferState = TransferState()
-            }) {
-                Text("Cancel")
+            if (isSharing) {
+                Button(onClick = {
+                    FluxDropCore.requestCancelServer()
+                    status = "Cancelled"
+                    pin = ""
+                    transferState = TransferState()
+                    isSharing = false
+                }) {
+                    Text("Cancel")
+                }
             }
         }
     }

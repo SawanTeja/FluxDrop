@@ -425,6 +425,90 @@ G_GNUC_END_IGNORE_DEPRECATIONS
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), list_box_);
     gtk_box_append(GTK_BOX(panel_), scroll);
 
+    // ─── Manual "Connect by IP" fallback ────────────────────────────────
+    GtkWidget* manual_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+    gtk_widget_set_margin_top(manual_box, 4);
+    gtk_widget_set_margin_bottom(manual_box, 4);
+
+    GtkWidget* hint_label = gtk_label_new("💡 Can't find your device?");
+    gtk_widget_add_css_class(hint_label, "subtitle-text");
+    gtk_label_set_xalign(GTK_LABEL(hint_label), 0.0);
+    gtk_box_append(GTK_BOX(manual_box), hint_label);
+
+    struct ManualConnectData {
+        DeviceListPanel* panel;
+        GtkWidget* ip_entry;
+        GtkWidget* port_entry;
+        GtkWidget* dialog;
+    };
+
+    // Static callbacks extracted to avoid G_CALLBACK macro issues with inline lambdas
+    static auto on_connect_manual = +[](GtkButton*, gpointer user) {
+        auto* d = static_cast<ManualConnectData*>(user);
+        GtkEntryBuffer* ip_buf = gtk_entry_get_buffer(GTK_ENTRY(d->ip_entry));
+        GtkEntryBuffer* port_buf = gtk_entry_get_buffer(GTK_ENTRY(d->port_entry));
+        std::string ip = gtk_entry_buffer_get_text(ip_buf);
+        std::string port_str = gtk_entry_buffer_get_text(port_buf);
+
+        if (ip.empty() || port_str.empty()) return;
+
+        networking::DiscoveredDevice device;
+        device.ip = ip;
+        device.port = static_cast<unsigned short>(std::stoi(port_str));
+        device.session_id = 0;
+
+        gtk_window_close(GTK_WINDOW(d->dialog));
+        d->panel->connect_to_device(device);
+        delete d;
+    };
+
+    static auto on_manual_btn_clicked = +[](GtkButton*, gpointer data) {
+        auto* self = static_cast<DeviceListPanel*>(data);
+        if (self->transferring_) return;
+
+        GtkWidget* dialog = gtk_window_new();
+        gtk_window_set_title(GTK_WINDOW(dialog), "Connect by IP");
+        gtk_window_set_default_size(GTK_WINDOW(dialog), 340, 200);
+        gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+        gtk_window_set_transient_for(GTK_WINDOW(dialog), self->parent_window_);
+
+        GtkWidget* vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+        gtk_widget_set_margin_start(vbox, 24);
+        gtk_widget_set_margin_end(vbox, 24);
+        gtk_widget_set_margin_top(vbox, 24);
+        gtk_widget_set_margin_bottom(vbox, 24);
+
+        GtkWidget* title = gtk_label_new("Enter the sender's IP and port");
+        gtk_widget_add_css_class(title, "title-text");
+        gtk_box_append(GTK_BOX(vbox), title);
+
+        GtkWidget* ip_entry = gtk_entry_new();
+        gtk_entry_set_placeholder_text(GTK_ENTRY(ip_entry), "IP address (e.g. 192.168.43.1)");
+        gtk_box_append(GTK_BOX(vbox), ip_entry);
+
+        GtkWidget* port_entry = gtk_entry_new();
+        gtk_entry_set_placeholder_text(GTK_ENTRY(port_entry), "Port (shown on sender)");
+        gtk_box_append(GTK_BOX(vbox), port_entry);
+
+        GtkWidget* connect_btn = gtk_button_new_with_label("Connect");
+        gtk_widget_add_css_class(connect_btn, "suggested-action");
+        gtk_box_append(GTK_BOX(vbox), connect_btn);
+
+        gtk_window_set_child(GTK_WINDOW(dialog), vbox);
+
+        auto* mcd = new ManualConnectData{self, ip_entry, port_entry, dialog};
+        g_signal_connect(connect_btn, "clicked", G_CALLBACK(on_connect_manual), mcd);
+
+        gtk_window_present(GTK_WINDOW(dialog));
+    };
+
+    GtkWidget* manual_btn = gtk_button_new_with_label("🔗 Connect by IP");
+    gtk_widget_add_css_class(manual_btn, "flat");
+    g_signal_connect(manual_btn, "clicked", G_CALLBACK(on_manual_btn_clicked), this);
+    gtk_box_append(GTK_BOX(manual_box), manual_btn);
+
+    gtk_box_append(GTK_BOX(panel_), manual_box);
+
     // ─── Status / Progress ──────────────────────────────────────────────
     GtkWidget* section = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
     gtk_widget_add_css_class(section, "section-box");
