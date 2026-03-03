@@ -12,12 +12,9 @@
 
 namespace fs = std::filesystem;
 
-// Simple logging for the core API layer
 #define CORE_LOG(msg) std::cerr << "[FD-CORE] " << msg << std::endl
 
-// ----------------------------------------------------------------------------
 // Global Instances
-// ----------------------------------------------------------------------------
 
 static std::unique_ptr<networking::Server> g_server;
 static std::unique_ptr<networking::Client> g_client;
@@ -29,9 +26,7 @@ static std::atomic<bool> g_client_cancel_flag{false};
 static std::thread g_server_thread;
 static std::thread g_client_thread;
 
-// ----------------------------------------------------------------------------
 // Core API Implementation
-// ----------------------------------------------------------------------------
 
 extern "C" {
 
@@ -47,9 +42,7 @@ void fd_cleanup() {
     CORE_LOG("fd_cleanup() — done");
 }
 
-// ----------------------------------------------------------------------------
 // Server Functions
-// ----------------------------------------------------------------------------
 
 void fd_start_server(const char** file_paths, int num_files,
                      fd_server_ready_cb ready_cb,
@@ -67,7 +60,6 @@ void fd_start_server(const char** file_paths, int num_files,
 
     g_server_cancel_flag = false;
 
-    // Parse files into TransferJobs
     std::queue<networking::TransferJob> jobs;
     uint32_t room_id = 482913;
 
@@ -94,7 +86,6 @@ void fd_start_server(const char** file_paths, int num_files,
 
     CORE_LOG("fd_start_server() — " << jobs.size() << " files queued");
 
-    // Set up callbacks
     networking::ServerCallbacks callbacks;
     callbacks.on_ready = [ready_cb](const std::string& ip, unsigned short port, uint16_t pin) {
         if (ready_cb) ready_cb(ip.c_str(), port, pin);
@@ -115,7 +106,6 @@ void fd_start_server(const char** file_paths, int num_files,
 
     g_server = std::make_unique<networking::Server>();
 
-    // Capture raw pointer — safe because fd_cancel_server() joins before reset()
     g_server_thread = std::thread([s = g_server.get(), jobs, callbacks]() {
         CORE_LOG("Server thread started");
         s->start_gui(jobs, callbacks);
@@ -143,12 +133,9 @@ void fd_request_cancel_server() {
     if (g_server) {
         g_server->stop();
     }
-    // Don't join — thread will exit on its own
 }
 
-// ----------------------------------------------------------------------------
 // Client Functions
-// ----------------------------------------------------------------------------
 
 void fd_start_discovery(uint32_t room_id, fd_client_device_found_cb found_cb) {
     CORE_LOG("fd_start_discovery() — room " << room_id);
@@ -157,7 +144,6 @@ void fd_start_discovery(uint32_t room_id, fd_client_device_found_cb found_cb) {
     }
     g_discovery->start([found_cb](const networking::DiscoveredDevice& d) {
         if (found_cb) {
-            // Keep IP string alive for the duration of the callback
             static thread_local std::string ip_storage;
             ip_storage = d.ip;
             fd_device_t dev;
@@ -246,7 +232,6 @@ void fd_request_cancel_client() {
     if (g_client) {
         g_client->stop();
     }
-    // Don't join — thread will exit on its own
 }
 
 } // extern "C"

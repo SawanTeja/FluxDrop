@@ -6,10 +6,10 @@
 
 namespace ui {
 
-// ─── Generation counter — incremented on cancel to discard stale idle callbacks
+// Generation counter
 static std::atomic<uint64_t> g_recv_gen{0};
 
-// ─── Idle callback data structs ─────────────────────────────────────────────
+// Idle callback data structs
 
 struct RecvStatusData {
     GtkWidget* label;
@@ -46,7 +46,7 @@ struct RecvReenableData {
     uint64_t gen;
 };
 
-// ─── Connect button callback data ──────────────────────────────────────────
+// Connect button callback data
 
 struct ConnectData {
     DeviceListPanel* panel;
@@ -63,10 +63,10 @@ struct FileRequestData {
     std::promise<bool>* promise;
 };
 
-// ─── Static context for C callbacks ─────────────────────────────────────────
+// Static context for C callbacks
 static DeviceListPanel* g_client_panel = nullptr;
 
-// ─── Idle callbacks (run on main thread) ────────────────────────────────────
+// Idle callbacks
 
 static gboolean update_recv_status_idle(gpointer data) {
     auto* d = static_cast<RecvStatusData*>(data);
@@ -235,7 +235,7 @@ static gboolean add_device_row_idle(gpointer d) {
     return G_SOURCE_REMOVE;
 }
 
-// ─── Connect button clicked handler ─────────────────────────────────────────
+// Connect button clicked handler
 
 void on_connect_btn_clicked(GtkButton* /*btn*/, gpointer data) {
     auto* cd = static_cast<ConnectData*>(data);
@@ -251,7 +251,6 @@ void on_connect_btn_clicked(GtkButton* /*btn*/, gpointer data) {
 
     gtk_window_close(GTK_WINDOW(cd->pin_window));
 
-    // Increment generation for this transfer session
     g_recv_gen++;
     uint64_t gen = g_recv_gen.load();
 
@@ -262,7 +261,6 @@ void on_connect_btn_clicked(GtkButton* /*btn*/, gpointer data) {
     gtk_label_set_text(GTK_LABEL(cd->panel->status_label_), "Connecting...");
     gtk_label_set_text(GTK_LABEL(cd->panel->progress_label_), "");
 
-    // Update static context
     g_client_panel = cd->panel;
 
     auto status_cb = [](const char* msg) {
@@ -289,9 +287,7 @@ void on_connect_btn_clicked(GtkButton* /*btn*/, gpointer data) {
         g_idle_add(file_request_idle, new FileRequestData{
             g_client_panel->parent_window_, filename, size, &prom
         });
-        // Wait with periodic timeout so cancellation can unblock us
         while (fut.wait_for(std::chrono::milliseconds(200)) != std::future_status::ready) {
-            // If we've been cancelled, reject and return
             if (!g_client_panel->transferring_) {
                 FD_WARN("File request interrupted by cancel — rejecting");
                 return false;
@@ -332,7 +328,7 @@ void on_connect_btn_clicked(GtkButton* /*btn*/, gpointer data) {
     delete cd;
 }
 
-// ─── DeviceListPanel ────────────────────────────────────────────────────────
+// DeviceListPanel
 
 DeviceListPanel::DeviceListPanel(GtkWindow* parent_window)
     : parent_window_(parent_window) {
@@ -345,7 +341,7 @@ DeviceListPanel::DeviceListPanel(GtkWindow* parent_window)
     gtk_widget_set_margin_top(panel_, 12);
     gtk_widget_set_margin_bottom(panel_, 12);
 
-    // ─── Header ─────────────────────────────────────────────────────────
+    // Header
     GtkWidget* header = gtk_label_new("📡 Nearby Devices");
     gtk_widget_add_css_class(header, "title-text");
     gtk_label_set_xalign(GTK_LABEL(header), 0.0);
@@ -356,7 +352,7 @@ DeviceListPanel::DeviceListPanel(GtkWindow* parent_window)
     gtk_label_set_xalign(GTK_LABEL(info_label_), 0.0);
     gtk_box_append(GTK_BOX(panel_), info_label_);
 
-    // ─── Save folder picker ─────────────────────────────────────────────
+    // Save folder picker
     const char* home = g_get_home_dir();
     std::string downloads = std::string(home) + "/Downloads";
     if (g_file_test(downloads.c_str(), G_FILE_TEST_IS_DIR)) {
@@ -412,7 +408,7 @@ G_GNUC_END_IGNORE_DEPRECATIONS
 
     gtk_box_append(GTK_BOX(panel_), save_row);
 
-    // ─── Device list ────────────────────────────────────────────────────
+    // Device list
     GtkWidget* scroll = gtk_scrolled_window_new();
     gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scroll), 200);
     gtk_widget_set_vexpand(scroll, TRUE);
@@ -425,7 +421,7 @@ G_GNUC_END_IGNORE_DEPRECATIONS
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), list_box_);
     gtk_box_append(GTK_BOX(panel_), scroll);
 
-    // ─── Manual "Connect by IP" fallback ────────────────────────────────
+    // Manual fallback
     GtkWidget* manual_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
     gtk_widget_set_margin_top(manual_box, 4);
     gtk_widget_set_margin_bottom(manual_box, 4);
@@ -442,7 +438,7 @@ G_GNUC_END_IGNORE_DEPRECATIONS
         GtkWidget* dialog;
     };
 
-    // Static callbacks extracted to avoid G_CALLBACK macro issues with inline lambdas
+    // Static callbacks
     static auto on_connect_manual = +[](GtkButton*, gpointer user) {
         auto* d = static_cast<ManualConnectData*>(user);
         GtkEntryBuffer* ip_buf = gtk_entry_get_buffer(GTK_ENTRY(d->ip_entry));
@@ -509,7 +505,7 @@ G_GNUC_END_IGNORE_DEPRECATIONS
 
     gtk_box_append(GTK_BOX(panel_), manual_box);
 
-    // ─── Status / Progress ──────────────────────────────────────────────
+    // Status
     GtkWidget* section = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
     gtk_widget_add_css_class(section, "section-box");
 
@@ -532,14 +528,11 @@ G_GNUC_END_IGNORE_DEPRECATIONS
         auto* self = static_cast<DeviceListPanel*>(data);
         FD_LOG("Cancel transfer button clicked — non-blocking cancel");
 
-        // Increment generation to invalidate stale callbacks
         g_recv_gen++;
         self->transferring_ = false;
 
-        // Non-blocking cancel — signals stop, closes socket, thread exits on its own
         fd_request_cancel_client();
 
-        // Reset UI immediately
         gtk_widget_set_visible(self->cancel_button_, FALSE);
         gtk_widget_set_visible(self->progress_bar_, FALSE);
         gtk_label_set_text(GTK_LABEL(self->status_label_), "Transfer cancelled.");

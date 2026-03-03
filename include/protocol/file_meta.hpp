@@ -12,7 +12,6 @@ struct FileInfo {
     std::string mime;
 };
 
-// Map JSON parsing automatically using nlohmann
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(FileInfo, filename, size, mime)
 
 } // namespace protocol

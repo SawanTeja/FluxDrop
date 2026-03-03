@@ -13,7 +13,6 @@ namespace fs = std::filesystem;
 
 static std::atomic<bool> g_transfer_done{false};
 
-// --- Callbacks for CLI ---
 void on_ready(const char* ip, int port, int pin) {
     std::cout << "Listening on " << ip << ":" << port << "\n";
     std::cout << "┌──────────────────────┐\n";
@@ -58,7 +57,6 @@ void on_device_found(const fd_device_t* dev) {
 int main(int argc, char* argv[]) {
     fd_init();
 
-    // CLI connect mode
     if (argc >= 4 && std::string(argv[1]) == "connect") {
         std::string ip = argv[2];
         unsigned short port = std::stoi(argv[3]);
@@ -79,7 +77,6 @@ int main(int argc, char* argv[]) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     } 
-    // CLI join mode (discovery)
     else if (argc >= 3 && std::string(argv[1]) == "join") {
         uint32_t room_id = std::stoul(argv[2]);
         std::string target_ip;
@@ -89,18 +86,13 @@ int main(int argc, char* argv[]) {
         
         std::atomic<bool> found{false};
         fd_start_discovery(room_id, [](const fd_device_t* dev) {
-            // Note: In real C we couldn't capture variables easily without a user_data void pointer.
-            // For now, this callback prints it. We should ideally stop discovery and connect.
             on_device_found(dev);
         });
         
-        // This is a simplified block. We really should wait for found, grab IP/Port, stop discovery, then connect.
-        // Doing a quick hack for CLI demo:
         std::cout << "Discovery started. (Auto-connect not fully implemented in this demo snippet yet. Press enter to exit)\n";
         std::cin.get();
         fd_stop_discovery();
     } 
-    // CLI send mode
     else if (argc > 1) {
         std::vector<std::string> string_paths;
         for (int i = 1; i < argc; ++i) {

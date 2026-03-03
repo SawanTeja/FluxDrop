@@ -1,79 +1,121 @@
 # FluxDrop
 
-A fast, secure, cross-platform (Windows & Linux) peer-to-peer file transfer tool for local networks. Transfer files and directories between machines on the same LAN with PIN-based authentication, chunked transfers with resume support, and real-time progress tracking.
+A fast, secure, cross-platform peer-to-peer file transfer tool for local networks. Transfer files between Linux, Windows, and Android devices on the same LAN with PIN-based authentication, chunked transfers with resume support, and real-time progress tracking.
 
 ## Features
 
-- **P2P LAN Transfer** — Direct TCP connections between machines, no cloud required
-- **Auto-Discovery** — UDP broadcast discovery to find peers on the network
-- **PIN Authentication** — 4-digit PIN with BLAKE2b hashing via libsodium
-- **Chunked Transfer** — 64KB chunks with a custom binary protocol (16-byte packet headers)
-- **Resume Support** — Interrupted downloads save as `.fluxpart` files and can resume
-- **Directory Transfer** — Recursively send entire directories preserving structure
-- **Progress Tracking** — Live speed (MB/s), percentage, and ETA display
-- **Disk Space Check** — Receiver validates available space before accepting files
+- **Cross-Platform** - Linux (CLI and GTK4 GUI), Windows (CLI), Android (Jetpack Compose)
+- **P2P LAN Transfer** - Direct TCP connections, no cloud required
+- **Auto-Discovery** - UDP broadcast and multicast discovery for peers
+- **Manual IP Connect** - Fallback for hotspot networks where discovery fails
+- **PIN Authentication** - 4-digit PIN with BLAKE2b hashing via libsodium
+- **Chunked Transfer** - 64KB chunks with a custom binary protocol
+- **Resume Support** - Interrupted downloads save as `.fluxpart` files
+- **Directory Transfer** - Recursively send directories preserving structure
+- **Progress Tracking** - Live speed (MB/s), percentage, filename display
+- **Disk Space Check** - Receiver validates space before accepting
 
 ---
 
-## Architecture
+## Project Structure
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                     main.cpp                        │
-│  CLI entry point — parses args, queues TransferJobs │
-└────────────┬───────────────────────────┬────────────┘
-             │                           │
-     ┌───────▼───────┐          ┌────────▼────────┐
-     │  Server Mode  │          │  Client Mode    │
-     │  (sender)     │          │  (receiver)     │
-     └───────┬───────┘          └────────┬────────┘
-             │                           │
-     ┌───────▼───────────────────────────▼────────┐
-     │            networking.cpp                   │
-     │  Server::start()  Client::connect/join()    │
-     │  UDP broadcast, PIN auth, transfer loop     │
-     └───────┬───────────────────────────┬─────────┘
-             │                           │
-     ┌───────▼────────┐         ┌────────▼────────┐
-     │  transfer.cpp  │         │  security.cpp   │
-     │  Send/receive  │         │  PIN gen/hash   │
-     │  files+headers │         │  via libsodium  │
-     └───────┬────────┘         └─────────────────┘
-             │
-     ┌───────▼────────┐
-     │   packet.cpp   │
-     │  Serialize /   │
-     │  deserialize   │
-     │  16-byte hdrs  │
-     └────────────────┘
+FluxDrop/
+├── include/                  # Shared C++ headers (all platforms)
+│   ├── fluxdrop_core.h       # C API for the transfer engine
+│   ├── networking.hpp        # Server, Client, DiscoveryListener classes
+│   ├── transfer.hpp          # File send/receive with progress
+│   ├── security.hpp          # PIN generation & BLAKE2b hashing
+│   └── protocol/             # Packet header & file metadata formats
+│       ├── packet.hpp
+│       └── file_meta.hpp
+│
+├── src/                      # Shared C++ source (all platforms)
+│   ├── core_api.cpp          # C API implementation (fd_* functions)
+│   ├── networking.cpp        # TCP server/client + UDP discovery
+│   ├── transfer.cpp          # Chunked file I/O + progress callbacks
+│   ├── security.cpp          # libsodium PIN hashing
+│   ├── packet.cpp            # Binary protocol serialization
+│   └── main.cpp              # CLI entry point (Linux/Windows)
+│
+├── linux/                    # Linux GTK4 GUI
+│   ├── CMakeLists.txt
+│   ├── include/ui/           # GUI panel headers
+│   └── src/ui/               # GTK4 implementation
+│       ├── main_window.cpp   # App shell, CSS, stack switcher
+│       ├── file_sender.cpp   # Send panel (file picker → server)
+│       ├── device_list.cpp   # Receive panel (discovery + connect)
+│       └── transfer_dialog.cpp
+│
+├── android/                  # Android app (Jetpack Compose + JNI)
+│   └── app/src/main/
+│       ├── cpp/
+│       │   ├── jni_bridge.cpp        # JNI ↔ C API bridge
+│       │   └── third_party/          # Boost, libsodium, spdlog headers
+│       └── java/dev/fluxdrop/app/
+│           ├── bridge/FluxDropCore.kt  # Kotlin ↔ JNI interface
+│           ├── ui/screens/
+│           │   ├── SendScreen.kt       # Share files screen
+│           │   └── ReceiveScreen.kt    # Receive files screen
+│           └── ui/components/
+│               └── TransferProgress.kt # Gradient progress bar
+│
+├── CMakeLists.txt            # Root CMake (CLI build)
+├── TESTING.md                # Full test suite documentation
+└── README.md                 # Project documentation
+
+### Architecture
+
 ```
-
-### Protocol Packet Format
-
-| Field          | Size    | Description                   |
-| -------------- | ------- | ----------------------------- |
-| `command`      | 4 bytes | Command type (network order)  |
-| `payload_size` | 4 bytes | Size of following payload     |
-| `session_id`   | 4 bytes | Room/session identifier       |
-| `reserved`     | 4 bytes | Reserved for future use       |
-
-**Command Types:** `FILE_META(1)`, `FILE_CHUNK(2)`, `CANCEL(3)`, `PING(4)`, `PONG(5)`, `RESUME(6)`, `AUTH(7)`, `AUTH_OK(8)`, `AUTH_FAIL(9)`
+┌──────────────────────────────────────────────────────────────┐
+│                        Frontend Layer                        │
+│  ┌──────────┐    ┌──────────────┐    ┌───────────────────┐   │
+│  │ CLI      │    │ Linux GTK4   │    │ Android Compose   │   │
+│  │ main.cpp │    │ linux/src/ui │    │ android/app/src   │   │
+│  └────┬─────┘    └──────┬───────┘    └────────┬──────────┘   │
+│       │                 │              JNI    │              │
+│       │                 │           bridge    │              │
+├───────▼─────────────────▼─────────────────────▼──────────────┤
+│                    Core Engine (C API)                        │
+│              include/fluxdrop_core.h                          │
+│              src/core_api.cpp                                 │
+├──────────────────────────────────────────────────────────────┤
+│  networking.cpp     │  transfer.cpp    │  security.cpp       │
+│  Server / Client    │  Send / Receive  │  PIN gen / hash     │
+│  UDP discovery      │  Chunked I/O     │  via libsodium      │
+│  (broadcast +       │  Resume support  │                     │
+│   multicast)        │  Progress cb     │                     │
+├──────────────────────────────────────────────────────────────┤
+│  protocol/packet.hpp + packet.cpp                            │
+│  16-byte binary headers │ FILE_META, FILE_CHUNK, AUTH, ...   │
+└──────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## Prerequisites
+## Core Engine API
 
-| Dependency    | Purpose               | Install (Fedora)                         | Install (Ubuntu/Debian)              |
-| ------------- | --------------------- | ---------------------------------------- | ------------------------------------ |
-| CMake ≥ 3.10  | Build system           | `sudo dnf install cmake`                 | `sudo apt install cmake`             |
-| C++20 compiler| Core language          | `sudo dnf install gcc-c++`               | `sudo apt install g++`               |
-| Boost         | Networking (Asio)      | `sudo dnf install boost-devel`           | `sudo apt install libboost-all-dev`  |
-| libsodium     | PIN hashing (BLAKE2b)  | `sudo dnf install libsodium-devel`       | `sudo apt install libsodium-dev`     |
-| nlohmann-json | JSON file metadata     | `sudo dnf install json-devel`            | `sudo apt install nlohmann-json3-dev`|
-| pkg-config    | Dependency resolution  | `sudo dnf install pkgconf-pkg-config`    | `sudo apt install pkg-config`        |
-| GTK4          | Graphical UI           | `sudo dnf install gtk4-devel`            | `sudo apt install libgtk-4-dev`      |
+The transfer engine is exposed as a **C API** (`fluxdrop_core.h`), designed for easy FFI binding to any language (Kotlin/JNI, Python/ctypes, Rust/FFI, etc.).
 
-### Install all at once (Linux)
+See **[API.md](API.md)** for the full reference: types, functions, callbacks, protocol format, discovery protocol, and integration guide.
+
+---
+
+## Building
+
+### Prerequisites
+
+| Dependency    | Purpose              | Fedora                          | Ubuntu/Debian                  |
+|---------------|----------------------|---------------------------------|--------------------------------|
+| CMake ≥ 3.10  | Build system         | `sudo dnf install cmake`        | `sudo apt install cmake`       |
+| C++20         | Core language        | `sudo dnf install gcc-c++`      | `sudo apt install g++`         |
+| Boost         | Networking (Asio)    | `sudo dnf install boost-devel`  | `sudo apt install libboost-all-dev` |
+| libsodium     | PIN hashing          | `sudo dnf install libsodium-devel` | `sudo apt install libsodium-dev` |
+| nlohmann-json | JSON metadata        | `sudo dnf install json-devel`   | `sudo apt install nlohmann-json3-dev` |
+| pkg-config    | Dep resolution       | `sudo dnf install pkgconf-pkg-config` | `sudo apt install pkg-config` |
+| GTK4          | Linux GUI only       | `sudo dnf install gtk4-devel`   | `sudo apt install libgtk-4-dev` |
+
+#### One-liner install
 
 **Fedora:**
 ```bash
@@ -82,522 +124,99 @@ sudo dnf install cmake gcc-c++ boost-devel libsodium-devel json-devel pkgconf-pk
 
 **Ubuntu/Debian:**
 ```bash
-sudo apt update
 sudo apt install cmake g++ libboost-all-dev libsodium-dev nlohmann-json3-dev pkg-config libgtk-4-dev
 ```
 
-### Install all at once (Windows MSYS2 UCRT64)
-
-Open the **MSYS2 UCRT64** terminal and run:
+**Windows (MSYS2 UCRT64):**
 ```bash
-pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-boost mingw-w64-ucrt-x86_64-libsodium mingw-w64-ucrt-x86_64-nlohmann-json mingw-w64-ucrt-x86_64-gtk4
+pacman -S mingw-w64-ucrt-x86_64-{gcc,cmake,pkgconf,boost,libsodium,nlohmann-json,gtk4}
 ```
 
----
+### Build Commands
 
-## Building
-
-### Linux
-
+#### Linux CLI
 ```bash
 cd ~/FluxDrop
 mkdir -p build && cd build
 cmake ..
 make -j$(nproc)
+# Binary: build/fluxdrop
 ```
 
-The binary is produced at `build/fluxdrop`.
+#### Linux GUI
+```bash
+cd ~/FluxDrop/linux
+mkdir -p build && cd build
+cmake ..
+make -j$(nproc)
+# Binary: build/fluxdrop_gui
+```
 
-### Windows (MSYS2 / UCRT64)
-
+#### Windows (MSYS2)
 ```bash
 cd /c/path/to/FluxDrop
 mkdir -p build && cd build
 cmake -G "MinGW Makefiles" ..
 cmake --build . -j%NUMBER_OF_PROCESSORS%
+# Binary: build/fluxdrop.exe
 ```
 
-The binary is produced at `build/fluxdrop.exe`.
+#### Android
+```bash
+cd ~/FluxDrop/android
+./gradlew assembleDebug
+# APK: app/build/outputs/apk/debug/app-debug.apk
+```
 
 ---
 
 ## Usage
 
-FluxDrop has three modes based on command-line arguments:
-
-### 1. Send Files (Server Mode)
+### CLI
 
 ```bash
-cd /tmp
-~/FluxDrop/build/fluxdrop myfile.txt
-```
+# Send files
+~/FluxDrop/build/fluxdrop file1.txt file2.pdf my_folder/
 
-You can send multiple files or entire directories:
-
-```bash
-~/FluxDrop/build/fluxdrop file1.txt file2.pdf image.png
-~/FluxDrop/build/fluxdrop my_folder/
-```
-
-**What happens:**
-1. The server binds to a random TCP port and starts UDP broadcasting on port `45454`
-2. A 4-digit PIN is displayed in the terminal
-3. Waits for a client to connect and authenticate with the PIN
-4. Sends each file sequentially, waiting for accept/reject per file
-
-### 2. Receive Files — Auto-Discovery (Client `join` Mode)
-
-```bash
-~/FluxDrop/build/fluxdrop join 482913
-```
-
-**What happens:**
-1. Listens on UDP port `45454` for broadcast messages
-2. When a matching `room_id` is found, auto-connects to the sender
-3. Prompts for the PIN displayed on the sender's terminal
-4. For each incoming file, prompts `Accept? (y/n)`
-5. Downloads accepted files to the current working directory
-
-> **Note:** The default `room_id` is `482913`. The sender always uses this unless changed in code.
-
-### 3. Receive Files — Direct Connect (Client `connect` Mode)
-
-```bash
-~/FluxDrop/build/fluxdrop connect <ip> <port>
-```
-
-**What happens:**
-1. Directly connects to the sender's IP and port (shown on sender's terminal)
-2. Same PIN prompt and file accept/reject flow as `join` mode
-
----
-
-## How to Test Everything
-
-> **Important:** All tests below assume you have already built the project. The binary is at:
-> ```
-> ~/FluxDrop/build/fluxdrop
-> ```
-> Every test requires **two terminal windows** open on the same machine (loopback testing).
-> Replace `<ip>` and `<port>` with the values shown by the sender's output.
-
----
-
-### Test 1: Build Verification
-
-Confirms the project compiles without errors.
-
-```bash
-cd ~/FluxDrop
-rm -rf build && mkdir build && cd build
-cmake ..
-make -j$(nproc)
-```
-
-**✅ Pass if:** Build completes with no errors and the binary exists:
-
-```bash
-ls -la ~/FluxDrop/build/fluxdrop
-```
-
----
-
-### Test 2: Single File Transfer (Loopback)
-
-Tests core file send/receive on the same machine.
-
-**Terminal 1 — Sender:**
-
-```bash
-echo "Hello FluxDrop" > /tmp/testfile.txt
-cd /tmp
-~/FluxDrop/build/fluxdrop testfile.txt
-```
-
-You'll see output like:
-```
-Total files to transfer: 1
-Listening on 192.168.1.42:53721
-┌──────────────────────┐
-│  Room PIN: 4827       │
-└──────────────────────┘
-```
-
-**Terminal 2 — Receiver (use the IP and port from above):**
-
-```bash
-mkdir -p /tmp/recv && cd /tmp/recv
-~/FluxDrop/build/fluxdrop connect 192.168.1.42 53721
-```
-
-Then follow the prompts:
-```
-Connected to peer!
-Enter room PIN: 4827        ← type the PIN shown in Terminal 1
-Authenticated! Waiting for file streams...
-
-Incoming file: testfile.txt (15.0B)
-Accept? (y/n) y             ← type y
-File accepted. Downloading...
-100% | X.X MB/s | ETA 00:00
-File transfer completed successfully.
-Download complete!
-```
-
-**✅ Pass if:**
-
-```bash
-cat /tmp/recv/testfile.txt
-# Output: Hello FluxDrop
-```
-
----
-
-### Test 3: Auto-Discovery via `join`
-
-Tests UDP broadcast discovery.
-
-**Terminal 1 — Sender:**
-
-```bash
-cd /tmp
-~/FluxDrop/build/fluxdrop testfile.txt
-```
-
-Note the PIN. The default Room ID is `482913`.
-
-**Terminal 2 — Receiver:**
-
-```bash
-mkdir -p /tmp/recv_join && cd /tmp/recv_join
-~/FluxDrop/build/fluxdrop join 482913
-```
-
-**✅ Pass if:** Receiver auto-discovers the sender:
-```
-Scanning for room 482913 broadcasts...
-Found host: 192.168.x.x room 482913
-Connected to peer!
-Enter room PIN:
-```
-
-Then same accept flow as Test 2.
-
----
-
-### Test 4: Wrong PIN Authentication
-
-Tests that invalid PINs are rejected.
-
-**Terminal 1 — Sender:**
-
-```bash
-cd /tmp
-~/FluxDrop/build/fluxdrop testfile.txt
-```
-
-**Terminal 2 — Receiver:**
-
-```bash
-~/FluxDrop/build/fluxdrop connect <ip> <port>
-# When prompted, enter a WRONG PIN like: 0000
-```
-
-**✅ Pass if:**
-- Receiver prints: `Authentication failed. Wrong PIN.`
-- Sender prints: `Authentication FAILED. Wrong PIN.`
-- Both sides exit. No files sent.
-
----
-
-### Test 5: File Rejection
-
-Tests that the receiver can decline incoming files.
-
-**Terminal 1 — Sender:**
-
-```bash
-cd /tmp
-~/FluxDrop/build/fluxdrop testfile.txt
-```
-
-**Terminal 2 — Receiver:**
-
-```bash
-mkdir -p /tmp/recv_reject && cd /tmp/recv_reject
-~/FluxDrop/build/fluxdrop connect <ip> <port>
-# Authenticate with the correct PIN
-# When prompted "Accept? (y/n)", type: n
-```
-
-**✅ Pass if:**
-- Sender prints: `Client rejected testfile.txt.` → `All transfers completed.`
-- Receiver prints: `File rejected.`
-- No file appears in `/tmp/recv_reject/`
-
----
-
-### Test 6: Multi-File Transfer
-
-Tests sending multiple files in one session.
-
-**Terminal 1 — Sender:**
-
-```bash
-echo "File A" > /tmp/a.txt
-echo "File B" > /tmp/b.txt
-echo "File C" > /tmp/c.txt
-cd /tmp
-~/FluxDrop/build/fluxdrop a.txt b.txt c.txt
-```
-
-Sender should print `Total files to transfer: 3`.
-
-**Terminal 2 — Receiver:**
-
-```bash
-mkdir -p /tmp/recv_multi && cd /tmp/recv_multi
-~/FluxDrop/build/fluxdrop connect <ip> <port>
-# Authenticate, then accept each of the 3 files
-```
-
-**✅ Pass if:**
-
-```bash
-ls /tmp/recv_multi/
-# a.txt  b.txt  c.txt
-```
-
----
-
-### Test 7: Directory Transfer
-
-Tests recursive directory sending with structure preserved.
-
-**Terminal 1 — Sender:**
-
-```bash
-mkdir -p /tmp/testdir/subdir
-echo "Root file" > /tmp/testdir/root.txt
-echo "Sub file" > /tmp/testdir/subdir/nested.txt
-cd /tmp
-~/FluxDrop/build/fluxdrop testdir/
-```
-
-Sender shows: `Queued directory: testdir/ (2 files)`
-
-**Terminal 2 — Receiver:**
-
-```bash
-mkdir -p /tmp/recv_dir && cd /tmp/recv_dir
-~/FluxDrop/build/fluxdrop connect <ip> <port>
-# Authenticate and accept both files
-```
-
-**✅ Pass if:** Directory structure is preserved:
-
-```bash
-find /tmp/recv_dir/ -type f
-# /tmp/recv_dir/testdir/root.txt
-# /tmp/recv_dir/testdir/subdir/nested.txt
-```
-
----
-
-### Test 8: Large File Transfer with Progress
-
-Tests progress bar (speed + ETA) with a big file.
-
-**Setup:**
-
-```bash
-dd if=/dev/urandom of=/tmp/large_test.bin bs=1M count=100
-```
-
-**Terminal 1 — Sender:**
-
-```bash
-cd /tmp
-~/FluxDrop/build/fluxdrop large_test.bin
-```
-
-**Terminal 2 — Receiver:**
-
-```bash
-mkdir -p /tmp/recv_large && cd /tmp/recv_large
-~/FluxDrop/build/fluxdrop connect <ip> <port>
-# Authenticate and accept
-```
-
-**✅ Pass if:** You see a live updating progress line like:
-```
-42% | 823.5 MB/s | ETA 00:01
-```
-
-And after completion, checksums match:
-
-```bash
-md5sum /tmp/large_test.bin /tmp/recv_large/large_test.bin
-```
-
----
-
-### Test 9: Transfer Resume (`.fluxpart`)
-
-Tests that interrupted downloads can be resumed.
-
-**Setup:**
-
-```bash
-dd if=/dev/urandom of=/tmp/resume_test.bin bs=1M count=200
-```
-
-**Step 1 — Start transfer and interrupt mid-way:**
-
-**Terminal 1:** `cd /tmp && ~/FluxDrop/build/fluxdrop resume_test.bin`
-
-**Terminal 2:**
-
-```bash
-mkdir -p /tmp/recv_resume && cd /tmp/recv_resume
-~/FluxDrop/build/fluxdrop connect <ip> <port>
-# Authenticate, accept the file, then press Ctrl+C midway
-```
-
-Verify partial file exists:
-
-```bash
-ls /tmp/recv_resume/
-# resume_test.bin.fluxpart   ← partial download
-```
-
-**Step 2 — Resume:**
-
-**Terminal 1:** `cd /tmp && ~/FluxDrop/build/fluxdrop resume_test.bin` (restart sender)
-
-**Terminal 2:**
-
-```bash
-cd /tmp/recv_resume
-~/FluxDrop/build/fluxdrop connect <ip> <port>
-# Authenticate
-```
-
-**✅ Pass if:** It detects the partial file and resumes:
-```
-Found partial download. XX.XMB out of 200.0MB downloaded.
-Accept? (y/n) y
-Resuming file transfer from offset...
-```
-
-After completion, verify:
-
-```bash
-md5sum /tmp/resume_test.bin /tmp/recv_resume/resume_test.bin
-# Both hashes should match
-```
-
----
-
-### Test 10: Disk Space Check
-
-Tests auto-rejection when disk space is insufficient.
-
-```bash
-# Create a tiny 1MB filesystem
-sudo mkdir -p /tmp/tinydisk
-sudo mount -t tmpfs -o size=1m tmpfs /tmp/tinydisk
-cd /tmp/tinydisk
-
-# Try to receive a large file (sender must be running with a >1MB file)
-~/FluxDrop/build/fluxdrop connect <ip> <port>
-```
-
-**✅ Pass if:**
-```
-Incoming file: large_test.bin (100.0MB)
-Error: Insufficient disk space! Requires 100.0MB but only 1.0MB available.
-Rejecting file automatically.
-```
-
-**Cleanup:**
-```bash
-sudo umount /tmp/tinydisk
-```
-
----
-
-### Test 11: Invalid Path Handling
-
-Tests that the sender handles nonexistent files gracefully.
-
-```bash
-~/FluxDrop/build/fluxdrop /tmp/nonexistent_file.txt
-```
-
-**✅ Pass if:**
-```
-Skipping invalid path: /tmp/nonexistent_file.txt
-Total files to transfer: 0
-```
-
----
-
-### Test 12: Two-Machine LAN Transfer
-
-Full integration test between two physical machines on the same network.
-
-**Machine A (Sender):**
-
-```bash
-~/FluxDrop/build/fluxdrop important_document.pdf
-# Note the IP, port, and PIN
-```
-
-**Machine B (Receiver):**
-
-```bash
-# Option 1: Auto-discovery
+# Receive (auto-discovery)
 ~/FluxDrop/build/fluxdrop join 482913
 
-# Option 2: Direct connect
-~/FluxDrop/build/fluxdrop connect <Machine-A-IP> <port>
+# Receive (direct connect)
+~/FluxDrop/build/fluxdrop connect <ip> <port>
 ```
 
-**If auto-discovery doesn't work**, open firewall ports:
+### Linux GUI
 
-```bash
-# Fedora (firewalld)
-sudo firewall-cmd --add-port=45454/udp
-sudo firewall-cmd --add-port=<port>/tcp
+Launch `fluxdrop_gui`. Use the **Send** tab to pick files and share (shows PIN). Use the **Receive** tab to discover senders or click **Connect by IP** for manual entry.
 
-# Ubuntu (ufw)
-sudo ufw allow 45454/udp
-sudo ufw allow <port>/tcp
-```
+### Android
+
+Open the app. Use the **Send** tab to select files. Use the **Receive** tab to discover senders. Tap a device or use **Connect by IP** if discovery does not work (e.g., due to Android UDP broadcast limitations on hotspots).
 
 ---
 
-## Quick Reference
+## Known Limitations and Issues
 
-| Action                    | Command                                                  |
-| ------------------------- | -------------------------------------------------------- |
-| Send file(s)              | `~/FluxDrop/build/fluxdrop file1.txt file2.txt`          |
-| Send directory            | `~/FluxDrop/build/fluxdrop my_folder/`                   |
-| Receive (auto-discovery)  | `~/FluxDrop/build/fluxdrop join 482913`                  |
-| Receive (direct connect)  | `~/FluxDrop/build/fluxdrop connect 192.168.1.5 34567`    |
+*   **Android UDP Broadcast:** Android devices often restrict or entirely block UDP broadcast packets, particularly when acting as a mobile hotspot. When sending files from an Android device to a Windows or Linux machine over an Android hotspot, automatic discovery will likely fail. 
+    *   **Workaround:** Use the "Connect by IP" feature and manually enter the Android device's IP address and port to establish the connection.
+
+---
 
 ## Troubleshooting
 
-| Problem                         | Solution                                                     |
-| ------------------------------- | ------------------------------------------------------------ |
-| `join` hangs forever            | Ensure both machines are on the same subnet; check firewall allows UDP 45454 |
-| Connection refused              | Verify sender is running; check TCP port isn't blocked       |
-| `libsodium initialization failed` | Reinstall libsodium-devel, rebuild                        |
-| Build fails on nlohmann/json    | Install `json-devel` (Fedora) or `nlohmann-json3-dev` (Ubuntu) |
-| Wrong PIN repeatedly            | Restart the sender to generate a new PIN                     |
-| Files land in wrong directory   | `cd` to the desired download directory before running client |
-| `.fluxpart` file left behind    | Partial download from interrupted transfer; resume or delete |
-| `Skipping invalid path`        | Check that the file/directory path exists and is accessible  |
-| Transfer speed is slow          | Both machines should ideally be on wired Ethernet; WiFi adds overhead |
+| Problem | Solution |
+|---------|----------|
+| `join` hangs forever | Ensure same subnet; check firewall allows UDP 45454 |
+| Connection refused | Verify sender is running; check TCP port isn't blocked |
+| Discovery fails on hotspot | Use "Connect by IP" and enter the sender's IP:port manually, common issue with Android devices |
+| `libsodium initialization failed` | Reinstall libsodium-devel, rebuild |
+| Build fails on nlohmann/json | Install `json-devel` (Fedora) or `nlohmann-json3-dev` (Ubuntu) |
+| Wrong PIN repeatedly | Restart sender to generate a new PIN |
+| `.fluxpart` file left behind | Partial download from interrupted transfer; resume or delete |
+| Transfer speed is slow | Use wired Ethernet; WiFi adds overhead |
 
+---
+
+## Testing
+
+See **[TESTING.md](TESTING.md)** for the complete test suite with step-by-step instructions.

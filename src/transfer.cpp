@@ -94,7 +94,6 @@ bool MessageSender::send_file(boost::asio::ip::tcp::socket& socket, const std::s
             return false;
         }
 
-        // Get file size
         file.seekg(0, std::ios::end);
         uint64_t file_size = file.tellg();
         file.seekg(start_offset);
@@ -107,7 +106,6 @@ bool MessageSender::send_file(boost::asio::ip::tcp::socket& socket, const std::s
         while (file.read(buffer.data(), buffer.size()) || file.gcount() > 0) {
             if (cancel_flag && cancel_flag->load()) {
                 std::cout << "\nTransfer cancelled locally.\n";
-                // Optionally send a CANCEL packet, though closing socket is safer.
                 protocol::PacketHeader cancel_header{
                     static_cast<uint32_t>(protocol::CommandType::CANCEL), 0, session_id, 0
                 };
@@ -149,13 +147,11 @@ TransferState MessageReceiver::receive_file(boost::asio::ip::tcp::socket& socket
     try {
         std::string part_file = filepath + ".fluxpart";
         
-        // Ensure parent directories exist for nested file paths
         std::filesystem::path parent = std::filesystem::path(part_file).parent_path();
         if (!parent.empty()) {
             std::filesystem::create_directories(parent);
         }
         
-        // Open in append mode if we have a start_offset
         std::ios_base::openmode mode = std::ios::binary;
         if (start_offset > 0) {
             mode |= std::ios::app;
@@ -175,7 +171,6 @@ TransferState MessageReceiver::receive_file(boost::asio::ip::tcp::socket& socket
             if (cancel_flag && cancel_flag->load()) {
                 std::cout << "\nTransfer cancelled locally.\n";
                 file.close();
-                // Send CANCEL to the sender
                 protocol::PacketHeader cancel_header{static_cast<uint32_t>(protocol::CommandType::CANCEL), 0, 0, 0};
                 MessageSender::send_header(socket, cancel_header);
                 return TransferState::CANCELLED;
@@ -189,7 +184,6 @@ TransferState MessageReceiver::receive_file(boost::asio::ip::tcp::socket& socket
                 file.write(buffer.data(), buffer.size());
                 total_received += header.payload_size;
 
-                // --- Progress Tracking ---
                 auto now = std::chrono::steady_clock::now();
                 auto elapsed_since_print = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_print_time).count();
                 
@@ -202,7 +196,6 @@ TransferState MessageReceiver::receive_file(boost::asio::ip::tcp::socket& socket
                     if (progress_cb) {
                         progress_cb(filepath, total_received, expected_size, speed_mbps);
                     } else {
-                        // CLI mode: print to stdout
                         int percent = (expected_size > 0) ? static_cast<int>((total_received * 100.0) / expected_size) : 100;
                         uint64_t remaining_bytes = expected_size - total_received;
                         double eta_seconds = (speed_bps > 0) ? (remaining_bytes / speed_bps) : 0;
@@ -233,7 +226,6 @@ TransferState MessageReceiver::receive_file(boost::asio::ip::tcp::socket& socket
         }
         file.close();
         
-        // Rename .fluxpart to final filename
         if (std::rename(part_file.c_str(), filepath.c_str()) != 0) {
              std::cerr << "Failed to rename temp file to: " << filepath << "\n";
              return TransferState::FAILED;

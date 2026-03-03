@@ -11,7 +11,6 @@
 
 namespace networking {
 
-// Multicast group for device discovery (works across hotspot networks)
 constexpr const char* MULTICAST_GROUP = "239.255.45.45";
 constexpr unsigned short DISCOVERY_PORT = 45454;
 
@@ -29,7 +28,6 @@ struct DiscoveredDevice {
 
 using DeviceFoundCallback = std::function<void(const DiscoveredDevice&)>;
 
-// Progress callback: filename, bytes_transferred, bytes_total, speed_mbps
 using ProgressCallback = std::function<void(const std::string&, uint64_t, uint64_t, double)>;
 using StatusCallback = std::function<void(const std::string&)>;
 
@@ -39,7 +37,7 @@ struct ServerCallbacks {
     ProgressCallback on_progress;
     std::function<void()> on_complete;
     std::function<void(const std::string&)> on_error;
-    std::atomic<bool>* cancel_flag = nullptr;  // set to true to abort waiting
+    std::atomic<bool>* cancel_flag = nullptr;
 };
 
 struct ClientCallbacks {

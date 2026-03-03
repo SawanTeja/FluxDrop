@@ -9,7 +9,6 @@
 
 namespace transfer {
 
-// Progress callback: filename, bytes_transferred, bytes_total, speed_mbps
 using TransferProgressCallback = std::function<void(const std::string&, uint64_t, uint64_t, double)>;
 
 enum class TransferState {

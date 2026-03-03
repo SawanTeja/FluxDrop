@@ -39,7 +39,6 @@ std::string get_local_ip(boost::asio::io_context& io_context) {
                 std::string s_addr(addr);
                 if (s_addr != "127.0.0.1" && std::string(ifa->ifa_name).find("dummy") == std::string::npos) {
                     ip = s_addr;
-                    // Prefer wireless or hotspot interfaces
                     if (std::string(ifa->ifa_name).find("wlan") != std::string::npos ||
                         std::string(ifa->ifa_name).find("ap") != std::string::npos ||
                         std::string(ifa->ifa_name).find("swlan") != std::string::npos) {
@@ -104,7 +103,6 @@ void Server::start(std::queue<TransferJob> jobs) {
         std::string ip = get_local_ip(io_context);
         unsigned short port = acceptor.local_endpoint().port();
         
-        // Generate and display PIN
         uint16_t pin = security::generate_pin();
         std::string pin_str = std::to_string(pin);
         std::string pin_hash = security::hash_pin(pin_str);
@@ -114,7 +112,7 @@ void Server::start(std::queue<TransferJob> jobs) {
         std::cout << "│  Room PIN: " << pin_str << "       │\n";
         std::cout << "└──────────────────────┘\n";
         
-        // --- UDP Broadcast Thread ---
+        // UDP Broadcast Thread
         std::atomic<bool> running{true};
         std::thread broadcast_thread([port, session_id, &running]() {
             try {
@@ -135,7 +133,7 @@ void Server::start(std::queue<TransferJob> jobs) {
             } catch (...) {}
         });
 
-        // --- TCP Acceptor ---
+        // TCP Acceptor
         tcp::socket socket(io_context);
         acceptor.accept(socket);
         
@@ -145,14 +143,13 @@ void Server::start(std::queue<TransferJob> jobs) {
             broadcast_thread.join();
         }
         
-        // --- PIN Authentication ---
+        // PIN Authentication
         protocol::PacketHeader auth_header = transfer::MessageReceiver::receive_header(socket);
         if (auth_header.command != static_cast<uint32_t>(protocol::CommandType::AUTH)) {
             std::cerr << "Expected AUTH packet, got command: " << auth_header.command << "\n";
             return;
         }
         
-        // Read the hashed PIN payload
         std::vector<char> auth_buf(auth_header.payload_size);
         boost::asio::read(socket, boost::asio::buffer(auth_buf));
         std::string received_hash(auth_buf.begin(), auth_buf.end());
@@ -187,7 +184,6 @@ void Server::start(std::queue<TransferJob> jobs) {
             while (!job_done) {
                 protocol::PacketHeader header = transfer::MessageReceiver::receive_header(socket);
                 
-                // Checking for disconnect / empty read
                 if (header.command == 0 && header.payload_size == 0 && header.session_id == 0) {
                     std::cout << "Client disconnected.\n";
                     return; // abort all jobs
@@ -196,7 +192,7 @@ void Server::start(std::queue<TransferJob> jobs) {
                 if (header.command == static_cast<uint32_t>(protocol::CommandType::PING)) {
                     protocol::PacketHeader pong_header{static_cast<uint32_t>(protocol::CommandType::PONG), 0, header.session_id, 0};
                     transfer::MessageSender::send_header(socket, pong_header);
-                } else if (header.command == static_cast<uint32_t>(protocol::CommandType::PONG)) { // Implicit Accept
+                } else if (header.command == static_cast<uint32_t>(protocol::CommandType::PONG)) {
                     std::cout << "Client accepted " << file_info.filename << ". Sending...\n";
                     transfer::MessageSender::send_file(socket, job.filepath, header.session_id);
                     job_done = true;
@@ -207,7 +203,7 @@ void Server::start(std::queue<TransferJob> jobs) {
                     job_done = true;
                 } else if (header.command == static_cast<uint32_t>(protocol::CommandType::CANCEL)) {
                     std::cout << "Client rejected " << file_info.filename << ".\n";
-                    job_done = true; // Move to next job
+                    job_done = true;
                 }
             }
             jobs.pop();
@@ -250,11 +246,9 @@ void Client::join(uint32_t room_id) {
                         port = std::stoi(message.substr(second_pipe + 1, third_pipe - second_pipe - 1));
                         instance_id = message.substr(third_pipe + 1);
                     } else {
-                        // Backwards compatibility for old format
                         port = std::stoi(message.substr(second_pipe + 1));
                     }
 
-                    // Ignore broadcasts originating from our own instance ID
                     if (instance_id == get_instance_id()) {
                         continue;
                     }
@@ -281,14 +275,13 @@ void Client::connect(const std::string& ip, unsigned short port) {
         boost::asio::connect(socket, resolver.resolve(ip, std::to_string(port)));
         std::cout << "Connected to peer!\n";
         
-        // --- PIN Authentication ---
+        // PIN Authentication
         std::cout << "Enter room PIN: ";
         std::string pin_input;
         std::getline(std::cin, pin_input);
         
         std::string hashed_pin = security::hash_pin(pin_input);
         
-        // Send AUTH packet with hashed PIN as payload
         protocol::PacketHeader auth_header{
             static_cast<uint32_t>(protocol::CommandType::AUTH),
             static_cast<uint32_t>(hashed_pin.size()),
@@ -297,7 +290,6 @@ void Client::connect(const std::string& ip, unsigned short port) {
         transfer::MessageSender::send_header(socket, auth_header);
         boost::asio::write(socket, boost::asio::buffer(hashed_pin));
         
-        // Wait for AUTH response
         protocol::PacketHeader auth_response = transfer::MessageReceiver::receive_header(socket);
         if (auth_response.command == static_cast<uint32_t>(protocol::CommandType::AUTH_FAIL)) {
             std::cout << "Authentication failed. Wrong PIN.\n";
@@ -308,12 +300,10 @@ void Client::connect(const std::string& ip, unsigned short port) {
         }
         std::cout << "Authenticated! Waiting for file streams...\n";
 
-        // Ask where to save files
         std::cout << "Save files to (default: current directory): ";
         std::string save_dir;
         std::getline(std::cin, save_dir);
         if (save_dir.empty()) save_dir = ".";
-        // Create save directory if needed
         if (save_dir != ".") {
             std::filesystem::create_directories(save_dir);
         }
@@ -332,7 +322,6 @@ void Client::connect(const std::string& ip, unsigned short port) {
                 
                 std::cout << "\nIncoming file: " << meta.filename << " (" << format_size(meta.size) << ")\n";
                 
-                // Perform Disk Space Check
                 uint64_t available_space = 0;
 #ifdef _WIN32
                 ULARGE_INTEGER free_bytes;
@@ -351,10 +340,9 @@ void Client::connect(const std::string& ip, unsigned short port) {
                     std::cout << "Rejecting file automatically.\n";
                     protocol::PacketHeader reject_header{static_cast<uint32_t>(protocol::CommandType::CANCEL), 0, header.session_id, 0};
                     transfer::MessageSender::send_header(socket, reject_header);
-                    continue; // Skip to next file
+                    continue;
                 }
 
-                // Check if .fluxpart already exists to resume
                 uint64_t resume_offset = 0;
                 std::string save_path = save_dir + "/" + meta.filename;
                 std::string part_file = save_path + ".fluxpart";
@@ -365,7 +353,6 @@ void Client::connect(const std::string& ip, unsigned short port) {
                     std::cout << "Found partial download. " << format_size(resume_offset) << " out of " << format_size(meta.size) << " downloaded.\n";
                 }
 
-                // Prompt user
                 std::cout << "Accept? (y/n) ";
                 std::string answer;
                 std::getline(std::cin, answer);
@@ -405,7 +392,7 @@ void Client::connect(const std::string& ip, unsigned short port) {
     }
 }
 
-// ─── DiscoveryListener ──────────────────────────────────────────────────────
+// DiscoveryListener
 
 DiscoveryListener::~DiscoveryListener() {
     stop();
@@ -425,10 +412,8 @@ void DiscoveryListener::start(DeviceFoundCallback callback) {
             socket.set_option(boost::asio::ip::multicast::join_group(
                 boost::asio::ip::make_address(MULTICAST_GROUP)));
 
-            // Get local IP to filter out own broadcasts
             std::string local_ip = get_local_ip(io_context);
 
-            // Non-blocking so we can check running_ periodically
             socket.non_blocking(true);
 
             while (running_) {
@@ -446,7 +431,6 @@ void DiscoveryListener::start(DeviceFoundCallback callback) {
 
                 if (ec) continue;
 
-                // Skip own broadcasts
                 std::string sender_ip = sender_endpoint.address().to_string();
                 if (sender_ip == local_ip) continue;
 
@@ -465,11 +449,9 @@ void DiscoveryListener::start(DeviceFoundCallback callback) {
                             device.port = std::stoi(message.substr(second_pipe + 1, third_pipe - second_pipe - 1));
                             instance_id = message.substr(third_pipe + 1);
                         } else {
-                            // Backwards compatibility for old format
                             device.port = std::stoi(message.substr(second_pipe + 1));
                         }
 
-                        // Ignore our own broadcasts
                         if (instance_id == get_instance_id()) continue;
 
                         device.ip = sender_ip;
@@ -490,7 +472,7 @@ void DiscoveryListener::stop() {
     }
 }
 
-// ─── Server GUI Mode ────────────────────────────────────────────────────────
+// Server GUI Mode
 
 void Server::start_gui(std::queue<TransferJob> jobs, ServerCallbacks callbacks) {
     try {
@@ -513,7 +495,6 @@ void Server::start_gui(std::queue<TransferJob> jobs, ServerCallbacks callbacks) 
 
         if (callbacks.on_ready) callbacks.on_ready(ip, port, pin);
 
-        // UDP Broadcast thread
         std::atomic<bool> broadcasting{true};
         std::thread broadcast_thread([port, session_id, &broadcasting]() {
             try {
@@ -552,9 +533,6 @@ void Server::start_gui(std::queue<TransferJob> jobs, ServerCallbacks callbacks) 
             socket_ = &socket;
         }
 
-        // Non-blocking accept loop — synchronous accept() is NOT reliably
-        // interrupted by closing the acceptor from another thread.
-        // Poll every 100ms and check the cancel flag instead.
         acceptor.non_blocking(true);
         boost::system::error_code accept_ec;
         while (true) {
@@ -575,7 +553,7 @@ void Server::start_gui(std::queue<TransferJob> jobs, ServerCallbacks callbacks) 
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 continue;
             }
-            break; // Either success or real error
+            break;
         }
 
         {
@@ -593,7 +571,6 @@ void Server::start_gui(std::queue<TransferJob> jobs, ServerCallbacks callbacks) 
 
         if (callbacks.on_status) callbacks.on_status("Client connected. Authenticating...");
 
-        // PIN Authentication
         protocol::PacketHeader auth_header = transfer::MessageReceiver::receive_header(socket);
         if (auth_header.command != static_cast<uint32_t>(protocol::CommandType::AUTH)) {
             if (callbacks.on_error) callbacks.on_error("Expected AUTH packet, got: " + std::to_string(auth_header.command));
@@ -616,7 +593,6 @@ void Server::start_gui(std::queue<TransferJob> jobs, ServerCallbacks callbacks) 
         protocol::PacketHeader ok_header{static_cast<uint32_t>(protocol::CommandType::AUTH_OK), 0, session_id, 0};
         transfer::MessageSender::send_header(socket, ok_header);
 
-        // Transfer files
         while (!jobs.empty()) {
             TransferJob job = jobs.front();
 
@@ -662,7 +638,7 @@ void Server::start_gui(std::queue<TransferJob> jobs, ServerCallbacks callbacks) 
     }
 }
 
-// ─── Client GUI Mode ────────────────────────────────────────────────────────
+// Client GUI Mode
 
 void Client::connect_gui(const std::string& ip, unsigned short port,
                           const std::string& pin, const std::string& save_dir,
@@ -692,7 +668,6 @@ void Client::connect_gui(const std::string& ip, unsigned short port,
 
         if (callbacks.on_status) callbacks.on_status("Connected! Authenticating...");
 
-        // Send hashed PIN
         std::string hashed_pin = security::hash_pin(pin);
         protocol::PacketHeader auth_header{
             static_cast<uint32_t>(protocol::CommandType::AUTH),
@@ -702,7 +677,6 @@ void Client::connect_gui(const std::string& ip, unsigned short port,
         transfer::MessageSender::send_header(socket, auth_header);
         boost::asio::write(socket, boost::asio::buffer(hashed_pin));
 
-        // Wait for auth response
         protocol::PacketHeader auth_response = transfer::MessageReceiver::receive_header(socket);
         if (auth_response.command == static_cast<uint32_t>(protocol::CommandType::AUTH_FAIL)) {
             if (callbacks.on_error) callbacks.on_error("Authentication failed. Wrong PIN.");
@@ -714,12 +688,11 @@ void Client::connect_gui(const std::string& ip, unsigned short port,
 
         if (callbacks.on_status) callbacks.on_status("Authenticated! Receiving files...");
 
-        // Receive files (auto-accept all)
         while (true) {
             protocol::PacketHeader header = transfer::MessageReceiver::receive_header(socket);
 
             if (header.command == 0 && header.payload_size == 0 && header.session_id == 0) {
-                break; // Server closed connection
+                break;
             }
 
             if (header.command == static_cast<uint32_t>(protocol::CommandType::FILE_META)) {
@@ -727,7 +700,6 @@ void Client::connect_gui(const std::string& ip, unsigned short port,
 
                 if (callbacks.on_status) callbacks.on_status("Receiving: " + meta.filename + " (" + format_size(meta.size) + ")");
 
-                // Perform Disk Space Check
                 uint64_t available_space = 0;
 #ifdef _WIN32
                 ULARGE_INTEGER free_bytes;
@@ -744,7 +716,7 @@ void Client::connect_gui(const std::string& ip, unsigned short port,
                     if (callbacks.on_error) callbacks.on_error("Insufficient disk space. Requires " + format_size(meta.size) + " but only " + format_size(available_space) + " available.");
                     protocol::PacketHeader reject_header{static_cast<uint32_t>(protocol::CommandType::CANCEL), 0, header.session_id, 0};
                     transfer::MessageSender::send_header(socket, reject_header);
-                    continue; // Skip to next file
+                    continue;
                 }
 
                 bool acc = true;
@@ -756,7 +728,7 @@ void Client::connect_gui(const std::string& ip, unsigned short port,
                     protocol::PacketHeader reject_header{static_cast<uint32_t>(protocol::CommandType::CANCEL), 0, header.session_id, 0};
                     transfer::MessageSender::send_header(socket, reject_header);
                     if (callbacks.on_status) callbacks.on_status("Skipped: " + meta.filename);
-                    continue; // Skip to next file
+                    continue;
                 }
 
                 std::string save_path = save_dir.empty() ? meta.filename : (save_dir + "/" + meta.filename);
@@ -785,7 +757,7 @@ void Client::connect_gui(const std::string& ip, unsigned short port,
                     if (callbacks.on_status) callbacks.on_status("Received: " + meta.filename);
                 } else if (state == transfer::TransferState::CANCELLED) {
                      if (callbacks.on_status) callbacks.on_status("Cancelled: " + meta.filename);
-                     break; // if cancelled during transfer, the session is usually stopped
+                     break;
                 } else if (state == transfer::TransferState::FAILED) {
                     if (callbacks.on_error) callbacks.on_error("Failed to receive: " + meta.filename);
                     break;

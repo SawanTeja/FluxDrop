@@ -198,28 +198,23 @@ MainWindow::MainWindow(GtkApplication* app) {
     gtk_window_set_title(GTK_WINDOW(window_), "FluxDrop");
     gtk_window_set_default_size(GTK_WINDOW(window_), 520, 650);
 
-    // Header bar
     header_bar_ = gtk_header_bar_new();
     gtk_window_set_titlebar(GTK_WINDOW(window_), header_bar_);
 
-    // Title label
     GtkWidget* title_label = gtk_label_new("FluxDrop");
     gtk_widget_add_css_class(title_label, "title-text");
     gtk_header_bar_set_title_widget(GTK_HEADER_BAR(header_bar_), title_label);
 
-    // Stack
     stack_ = gtk_stack_new();
     gtk_stack_set_transition_type(GTK_STACK(stack_), GTK_STACK_TRANSITION_TYPE_SLIDE_LEFT_RIGHT);
     gtk_stack_set_transition_duration(GTK_STACK(stack_), 300);
 
-    // Create panels
     send_panel_ = new FileSenderPanel(GTK_WINDOW(window_));
     receive_panel_ = new DeviceListPanel(GTK_WINDOW(window_));
 
     gtk_stack_add_titled(GTK_STACK(stack_), send_panel_->get_widget(), "send", "Send File");
     gtk_stack_add_titled(GTK_STACK(stack_), receive_panel_->get_widget(), "receive", "Receive");
 
-    // Stack switcher in header
     GtkWidget* switcher = gtk_stack_switcher_new();
     gtk_stack_switcher_set_stack(GTK_STACK_SWITCHER(switcher), GTK_STACK(stack_));
     gtk_header_bar_set_title_widget(GTK_HEADER_BAR(header_bar_), switcher);
@@ -228,7 +223,6 @@ MainWindow::MainWindow(GtkApplication* app) {
 
     g_signal_connect(window_, "destroy", G_CALLBACK(on_destroy), this);
 
-    // Start device discovery automatically
     receive_panel_->start_discovery();
 
     gtk_window_present(GTK_WINDOW(window_));
@@ -243,7 +237,6 @@ MainWindow::~MainWindow() {
 }
 
 static void activate_callback(GtkApplication* app, gpointer /*user_data*/) {
-    // MainWindow allocated on heap, cleaned up on window destroy
     new MainWindow(app);
 }
 

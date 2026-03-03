@@ -9,10 +9,10 @@ namespace fs = std::filesystem;
 
 namespace ui {
 
-// ─── Generation counter — incremented on cancel/restart to discard stale idles
+// Generation counter
 static std::atomic<uint64_t> g_sender_gen{0};
 
-// ─── Idle callback data structs ─────────────────────────────────────────────
+// Idle callback data structs
 
 struct StatusUpdateData {
     GtkWidget* label;
@@ -50,7 +50,7 @@ struct ReenableData {
     uint64_t gen;
 };
 
-// ─── Idle callbacks (run on main thread) ────────────────────────────────────
+// Idle callbacks
 
 static gboolean update_status_idle(gpointer data) {
     auto* d = static_cast<StatusUpdateData*>(data);
@@ -122,7 +122,7 @@ static gboolean reenable_ui_idle(gpointer data) {
     return G_SOURCE_REMOVE;
 }
 
-// ─── Static context for C callbacks (no user_data in C API) ─────────────────
+// Static context for C callbacks
 
 static GtkWidget* g_pin_lbl = nullptr;
 static GtkWidget* g_status_lbl = nullptr;
@@ -135,7 +135,7 @@ static GtkWidget* g_choose_file_btn = nullptr;
 static GtkWidget* g_choose_folder_btn = nullptr;
 static std::atomic<bool>* g_running_ptr = nullptr;
 
-// ─── FileSenderPanel ────────────────────────────────────────────────────────
+// FileSenderPanel
 
 FileSenderPanel::FileSenderPanel(GtkWindow* parent_window)
     : parent_window_(parent_window) {
@@ -148,7 +148,7 @@ FileSenderPanel::FileSenderPanel(GtkWindow* parent_window)
     gtk_widget_set_margin_top(panel_, 12);
     gtk_widget_set_margin_bottom(panel_, 12);
 
-    // ─── Drop zone ──────────────────────────────────────────────────────
+    // Drop zone
     drop_area_ = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
     gtk_widget_add_css_class(drop_area_, "drop-zone");
     gtk_widget_set_vexpand(drop_area_, FALSE);
@@ -163,12 +163,12 @@ FileSenderPanel::FileSenderPanel(GtkWindow* parent_window)
 
     gtk_box_append(GTK_BOX(panel_), drop_area_);
 
-    // ─── Drag & drop target ─────────────────────────────────────────────
+    // Drag & drop target
     GtkDropTarget* drop_target = gtk_drop_target_new(GDK_TYPE_FILE_LIST, GDK_ACTION_COPY);
     g_signal_connect(drop_target, "drop", G_CALLBACK(on_drop), this);
     gtk_widget_add_controller(drop_area_, GTK_EVENT_CONTROLLER(drop_target));
 
-    // ─── Buttons row ────────────────────────────────────────────────────
+    // Buttons row
     GtkWidget* btn_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_set_halign(btn_box, GTK_ALIGN_CENTER);
     gtk_widget_set_margin_top(btn_box, 4);
@@ -185,7 +185,7 @@ FileSenderPanel::FileSenderPanel(GtkWindow* parent_window)
 
     gtk_box_append(GTK_BOX(panel_), btn_box);
 
-    // ─── File list ──────────────────────────────────────────────────────
+    // File list
     GtkWidget* scroll = gtk_scrolled_window_new();
     gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scroll), 120);
     gtk_widget_set_vexpand(scroll, TRUE);
@@ -197,7 +197,7 @@ FileSenderPanel::FileSenderPanel(GtkWindow* parent_window)
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), file_list_box_);
     gtk_box_append(GTK_BOX(panel_), scroll);
 
-    // ─── Action row ─────────────────────────────────────────────────────
+    // Action row
     GtkWidget* action_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_set_halign(action_box, GTK_ALIGN_CENTER);
     gtk_widget_set_margin_top(action_box, 4);
@@ -213,7 +213,6 @@ FileSenderPanel::FileSenderPanel(GtkWindow* parent_window)
     g_signal_connect(clear_button_, "clicked", G_CALLBACK(on_clear_clicked), this);
     gtk_box_append(GTK_BOX(action_box), clear_button_);
 
-    // Cancel button (hidden by default)
     GtkWidget* cancel_button = gtk_button_new_with_label("⏹ Cancel Sharing");
     gtk_widget_add_css_class(cancel_button, "destructive-action");
     gtk_widget_set_visible(cancel_button, FALSE);
@@ -223,7 +222,7 @@ FileSenderPanel::FileSenderPanel(GtkWindow* parent_window)
 
     gtk_box_append(GTK_BOX(panel_), action_box);
 
-    // ─── PIN / Status / Progress ────────────────────────────────────────
+    // Status
     pin_label_ = gtk_label_new("");
     gtk_widget_add_css_class(pin_label_, "pin-display");
     gtk_widget_set_visible(pin_label_, FALSE);
@@ -311,13 +310,11 @@ void FileSenderPanel::start_server() {
 
     FD_LOG("start_server() — starting with " << queued_files_.size() << " files");
 
-    // Increment generation to invalidate any stale idles from previous sessions
     g_sender_gen++;
     uint64_t gen = g_sender_gen.load();
 
     server_running_ = true;
 
-    // Toggle button visibility
     gtk_widget_set_visible(send_button_, FALSE);
     gtk_widget_set_visible(clear_button_, FALSE);
     GtkWidget* cancel_btn = static_cast<GtkWidget*>(g_object_get_data(G_OBJECT(send_button_), "cancel-btn"));
@@ -331,13 +328,11 @@ void FileSenderPanel::start_server() {
     gtk_label_set_text(GTK_LABEL(status_label_), "Starting server...");
     gtk_label_set_text(GTK_LABEL(progress_label_), "");
 
-    // Prepare C path array
     std::vector<const char*> c_paths;
     for (const auto& filepath : queued_files_) {
         c_paths.push_back(filepath.c_str());
     }
 
-    // Update static context for C callbacks
     g_pin_lbl = pin_label_;
     g_status_lbl = status_label_;
     g_progress_br = progress_bar_;
@@ -412,14 +407,11 @@ void FileSenderPanel::start_server() {
 void FileSenderPanel::cancel_server() {
     FD_LOG("cancel_server() — non-blocking cancel, incrementing generation");
 
-    // Increment generation FIRST — this invalidates all pending idle callbacks
     g_sender_gen++;
     server_running_ = false;
 
-    // Non-blocking cancel: signals stop + closes sockets, thread exits on its own
     fd_request_cancel_server();
 
-    // Reset UI immediately on the main thread
     gtk_label_set_text(GTK_LABEL(pin_label_), "");
     gtk_widget_set_visible(pin_label_, FALSE);
     gtk_widget_set_visible(progress_bar_, FALSE);
@@ -427,7 +419,6 @@ void FileSenderPanel::cancel_server() {
     gtk_label_set_text(GTK_LABEL(progress_label_), "");
     gtk_label_set_text(GTK_LABEL(status_label_), "Sharing cancelled.");
 
-    // Re-enable buttons
     gtk_widget_set_visible(send_button_, TRUE);
     gtk_widget_set_sensitive(send_button_, !queued_files_.empty());
     gtk_widget_set_visible(clear_button_, TRUE);
@@ -440,7 +431,7 @@ void FileSenderPanel::cancel_server() {
     FD_LOG("cancel_server() — UI reset complete");
 }
 
-// ─── GTK Callbacks ──────────────────────────────────────────────────────────
+// GTK Callbacks
 
 void FileSenderPanel::on_choose_file(GtkButton* /*button*/, gpointer user_data) {
     auto* self = static_cast<FileSenderPanel*>(user_data);

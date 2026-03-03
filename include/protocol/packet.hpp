@@ -17,12 +17,11 @@ enum class CommandType : uint32_t {
     AUTH_FAIL = 9
 };
 
-// Fixed 16-byte header
 struct PacketHeader {
-    uint32_t command;      // 4 bytes
-    uint32_t payload_size; // 4 bytes
-    uint32_t session_id;   // 4 bytes
-    uint32_t reserved;     // 4 bytes
+    uint32_t command;
+    uint32_t payload_size;
+    uint32_t session_id;
+    uint32_t reserved;
 };
 
 std::array<uint8_t, 16> serialize_header(const PacketHeader& header);
