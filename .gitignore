@@ -5,8 +5,35 @@ libfluxdrop_core.so
 libfluxdrop_core.dylib
 libfluxdrop_core.lib
 libfluxdrop_core.dll
-libfluxdrop_core.dylib
-libfluxdrop_core.a
 connect.txt
 connect.log
 Plan.md
+
+# ── Android ──────────────────────────────────────
+
+# Gradle
+android/.gradle/
+android/build/
+android/app/build/
+android/build.log
+
+# Android Studio / IntelliJ IDEA
+android/.idea/
+*.iml
+
+# Local properties (contains local SDK path – machine-specific)
+android/local.properties
+
+# Native (CMake / ndk-build) build caches
+android/app/.cxx/
+
+# Third-party sources & tarballs (fetched at build time)
+android/app/src/main/cpp/third_party/libsodium/
+android/app/src/main/cpp/third_party/libsodium-*.tar.gz
+android/app/src/main/cpp/third_party/boost/
+android/app/src/main/cpp/third_party/boost.tar.gz
+
+# Signing configs
+android/*.jks
+android/*.keystore
+android/keystore.properties
