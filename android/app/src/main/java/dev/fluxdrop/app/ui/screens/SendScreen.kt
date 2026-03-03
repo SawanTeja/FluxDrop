@@ -14,6 +14,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import dev.fluxdrop.app.bridge.FluxDropCore
 import dev.fluxdrop.app.bridge.ServerCallbacks
+import dev.fluxdrop.app.ui.components.TransferProgress
+import dev.fluxdrop.app.ui.components.TransferState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -27,7 +29,7 @@ fun SendScreen(modifier: Modifier = Modifier) {
     var selectedFiles by remember { mutableStateOf<List<Uri>>(emptyList()) }
     var pin by remember { mutableStateOf("") }
     var status by remember { mutableStateOf("Ready to send") }
-    var progress by remember { mutableStateOf(0f) }
+    var transferState by remember { mutableStateOf(TransferState()) }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) {
@@ -48,8 +50,9 @@ fun SendScreen(modifier: Modifier = Modifier) {
         Text("Status: $status")
         Spacer(modifier = Modifier.height(16.dp))
 
-        if (progress > 0f) {
-            LinearProgressIndicator(progress = progress, modifier = Modifier.fillMaxWidth())
+        // ── Transfer progress (desktop-style) ──
+        if (transferState.progress > 0f) {
+            TransferProgress(state = transferState)
             Spacer(modifier = Modifier.height(16.dp))
         }
 
@@ -87,11 +90,21 @@ fun SendScreen(modifier: Modifier = Modifier) {
                         override fun onStatus(message: String) { status = message }
                         override fun onError(error: String) { status = "Error: $error" }
                         override fun onProgress(filename: String, transferred: Long, total: Long, speedMbps: Double) {
-                            if (total > 0) progress = transferred.toFloat() / total.toFloat()
+                            transferState = TransferState(
+                                progress = if (total > 0) transferred.toFloat() / total.toFloat() else 0f,
+                                filename = filename,
+                                speedMbps = speedMbps,
+                                transferred = transferred,
+                                total = total,
+                                status = "Sending..."
+                            )
                         }
                         override fun onComplete() {
-                            status = "Transfer Complete"
-                            progress = 1f
+                            status = "Transfer Complete ✅"
+                            transferState = transferState.copy(
+                                progress = 1f,
+                                status = "All files transferred!"
+                            )
                         }
                     })
                 }
@@ -104,7 +117,7 @@ fun SendScreen(modifier: Modifier = Modifier) {
                 FluxDropCore.requestCancelServer()
                 status = "Cancelled"
                 pin = ""
-                progress = 0f
+                transferState = TransferState()
             }) {
                 Text("Cancel")
             }
