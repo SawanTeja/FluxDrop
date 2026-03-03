@@ -16,12 +16,43 @@
 #else
   #include <sys/statvfs.h>
 #endif
+#ifdef __ANDROID__
+  #include <ifaddrs.h>
+  #include <netinet/in.h>
+  #include <arpa/inet.h>
+#endif
 
 using boost::asio::ip::tcp;
 
 namespace networking {
 
 std::string get_local_ip(boost::asio::io_context& io_context) {
+#ifdef __ANDROID__
+    struct ifaddrs *ifap, *ifa;
+    struct sockaddr_in *sa;
+    std::string ip = "127.0.0.1";
+    if (getifaddrs(&ifap) != -1) {
+        for (ifa = ifap; ifa != nullptr; ifa = ifa->ifa_next) {
+            if (ifa->ifa_addr != nullptr && ifa->ifa_addr->sa_family == AF_INET) {
+                sa = (struct sockaddr_in *)ifa->ifa_addr;
+                char* addr = inet_ntoa(sa->sin_addr);
+                std::string s_addr(addr);
+                if (s_addr != "127.0.0.1" && std::string(ifa->ifa_name).find("dummy") == std::string::npos) {
+                    ip = s_addr;
+                    // Prefer wireless or hotspot interfaces
+                    if (std::string(ifa->ifa_name).find("wlan") != std::string::npos ||
+                        std::string(ifa->ifa_name).find("ap") != std::string::npos ||
+                        std::string(ifa->ifa_name).find("swlan") != std::string::npos) {
+                        break;
+                    }
+                }
+            }
+        }
+        freeifaddrs(ifap);
+    }
+    if (ip != "127.0.0.1") return ip;
+#endif
+
     try {
         boost::asio::ip::udp::socket socket(io_context);
         socket.connect(boost::asio::ip::udp::endpoint(boost::asio::ip::make_address("8.8.8.8"), 53));
