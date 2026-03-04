@@ -3,7 +3,17 @@
 #include "fluxdrop_core.h"
 #include "logger.hpp"
 
+#ifdef _WIN32
+#include <stdlib.h>
+#endif
+
 int main(int argc, char* argv[]) {
+
+#ifdef _WIN32
+    // Force OpenGL rendering on Windows to prevent GTK4 Vulkan crashes due to Optimus/OBS
+    _putenv("GSK_RENDERER=gl");
+#endif
+
     FD_LOG("FluxDrop starting");
     fd_init();
 

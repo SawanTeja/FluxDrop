@@ -13,7 +13,7 @@ find_package(Threads REQUIRED)
 find_package(nlohmann_json REQUIRED)
 
 # Define the GUI executable
-add_executable(fluxdrop_gui
+add_executable(fluxdrop_gui WIN32
     src/main.cpp
     src/ui/main_window.cpp
     src/ui/device_list.cpp
@@ -39,6 +39,10 @@ target_link_libraries(fluxdrop_gui PRIVATE
     ${Boost_LIBRARIES}
     ${SODIUM_LIBRARIES}
 )
+
+if (WIN32)
+    target_link_libraries(fluxdrop_gui PRIVATE ws2_32 mswsock bcrypt)
+endif()
 
 target_compile_options(fluxdrop_gui PRIVATE ${GTK4_CFLAGS_OTHER})
 
