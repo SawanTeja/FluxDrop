@@ -13,13 +13,18 @@ find_package(Threads REQUIRED)
 find_package(nlohmann_json REQUIRED)
 
 # Define the GUI executable
-add_executable(fluxdrop_gui WIN32
+add_executable(fluxdrop_gui
     src/main.cpp
     src/ui/main_window.cpp
     src/ui/device_list.cpp
     src/ui/file_sender.cpp
     src/ui/transfer_dialog.cpp
 )
+
+# Build without console if on Windows
+if (WIN32)
+    set_property(TARGET fluxdrop_gui PROPERTY WIN32_EXECUTABLE ON)
+endif()
 
 # Include core headers and local UI headers
 target_include_directories(fluxdrop_gui PRIVATE
