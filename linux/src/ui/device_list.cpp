@@ -353,12 +353,12 @@ DeviceListPanel::DeviceListPanel(GtkWindow* parent_window)
     gtk_box_append(GTK_BOX(panel_), info_label_);
 
     // Save folder picker
-    const char* home = g_get_home_dir();
-    std::string downloads = std::string(home) + "/Downloads";
-    if (g_file_test(downloads.c_str(), G_FILE_TEST_IS_DIR)) {
-        save_dir_ = downloads;
+    const char* downloads_dir = g_get_user_special_dir(G_USER_DIRECTORY_DOWNLOAD);
+    if (downloads_dir && g_file_test(downloads_dir, G_FILE_TEST_IS_DIR)) {
+        save_dir_ = downloads_dir;
     } else {
-        save_dir_ = home;
+        const char* home = g_get_home_dir();
+        save_dir_ = home ? home : ".";
     }
 
     GtkWidget* save_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
