@@ -133,37 +133,39 @@ void Server::start(std::queue<TransferJob> jobs) {
             } catch (...) {}
         });
 
-        // TCP Acceptor
-        tcp::socket socket(io_context);
-        acceptor.accept(socket);
-        
-        std::cout << "Client connected. Awaiting PIN authentication...\n";
-        running = false;
-        if (broadcast_thread.joinable()) {
-            broadcast_thread.join();
-        }
-        
-        // PIN Authentication
-        protocol::PacketHeader auth_header = transfer::MessageReceiver::receive_header(socket);
-        if (auth_header.command != static_cast<uint32_t>(protocol::CommandType::AUTH)) {
-            std::cerr << "Expected AUTH packet, got command: " << auth_header.command << "\n";
-            return;
-        }
-        
-        std::vector<char> auth_buf(auth_header.payload_size);
-        boost::asio::read(socket, boost::asio::buffer(auth_buf));
-        std::string received_hash(auth_buf.begin(), auth_buf.end());
-        
-        if (received_hash != pin_hash) {
-            std::cout << "Authentication FAILED. Wrong PIN.\n";
-            protocol::PacketHeader fail_header{static_cast<uint32_t>(protocol::CommandType::AUTH_FAIL), 0, session_id, 0};
-            transfer::MessageSender::send_header(socket, fail_header);
-            return;
-        }
-        
-        std::cout << "Authentication successful!\n";
-        protocol::PacketHeader ok_header{static_cast<uint32_t>(protocol::CommandType::AUTH_OK), 0, session_id, 0};
-        transfer::MessageSender::send_header(socket, ok_header);
+        while (true) {
+            // TCP Acceptor
+            tcp::socket socket(io_context);
+            acceptor.accept(socket);
+            
+            std::cout << "Client connected. Awaiting PIN authentication...\n";
+            
+            // PIN Authentication
+            protocol::PacketHeader auth_header = transfer::MessageReceiver::receive_header(socket);
+            if (auth_header.command != static_cast<uint32_t>(protocol::CommandType::AUTH)) {
+                std::cerr << "Expected AUTH packet, got command: " << auth_header.command << "\n";
+                continue;
+            }
+            
+            std::vector<char> auth_buf(auth_header.payload_size);
+            boost::asio::read(socket, boost::asio::buffer(auth_buf));
+            std::string received_hash(auth_buf.begin(), auth_buf.end());
+            
+            if (received_hash != pin_hash) {
+                std::cout << "Authentication FAILED. Wrong PIN.\n";
+                protocol::PacketHeader fail_header{static_cast<uint32_t>(protocol::CommandType::AUTH_FAIL), 0, session_id, 0};
+                transfer::MessageSender::send_header(socket, fail_header);
+                continue;
+            }
+            
+            running = false;
+            if (broadcast_thread.joinable()) {
+                broadcast_thread.join();
+            }
+
+            std::cout << "Authentication successful!\n";
+            protocol::PacketHeader ok_header{static_cast<uint32_t>(protocol::CommandType::AUTH_OK), 0, session_id, 0};
+            transfer::MessageSender::send_header(socket, ok_header);
 
         while (!jobs.empty()) {
             TransferJob job = jobs.front();
@@ -207,6 +209,8 @@ void Server::start(std::queue<TransferJob> jobs) {
                 }
             }
             jobs.pop();
+        }
+        break;
         }
         std::cout << "All transfers completed.\n";
     } catch (std::exception& e) {
@@ -516,82 +520,93 @@ void Server::start_gui(std::queue<TransferJob> jobs, ServerCallbacks callbacks) 
             } catch (...) {}
         });
 
-        tcp::socket socket(io_context);
-
-        struct ServerSocketGuard {
-            Server* s;
-            ~ServerSocketGuard() {
-                std::lock_guard<std::mutex> lock(s->mtx_);
-                s->acceptor_ = nullptr;
-                s->socket_ = nullptr;
-            }
-        } sg{this};
-
         {
             std::lock_guard<std::mutex> lock(mtx_);
             acceptor_ = &acceptor;
-            socket_ = &socket;
         }
 
-        acceptor.non_blocking(true);
-        boost::system::error_code accept_ec;
         while (true) {
+            tcp::socket socket(io_context);
+            
             {
                 std::lock_guard<std::mutex> lock(mtx_);
-                if (stopped_) {
+                socket_ = &socket;
+            }
+
+            acceptor.non_blocking(true);
+            boost::system::error_code accept_ec;
+            while (true) {
+                {
+                    std::lock_guard<std::mutex> lock(mtx_);
+                    if (stopped_) {
+                        accept_ec = boost::asio::error::operation_aborted;
+                        break;
+                    }
+                }
+                if (callbacks.cancel_flag && callbacks.cancel_flag->load()) {
                     accept_ec = boost::asio::error::operation_aborted;
                     break;
                 }
-            }
-            if (callbacks.cancel_flag && callbacks.cancel_flag->load()) {
-                accept_ec = boost::asio::error::operation_aborted;
+                acceptor.accept(socket, accept_ec);
+                if (accept_ec == boost::asio::error::would_block ||
+                    accept_ec == boost::asio::error::try_again) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    continue;
+                }
                 break;
             }
-            acceptor.accept(socket, accept_ec);
-            if (accept_ec == boost::asio::error::would_block ||
-                accept_ec == boost::asio::error::try_again) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+            if (accept_ec || (callbacks.cancel_flag && callbacks.cancel_flag->load())) {
+                broadcasting = false;
+                if (broadcast_thread.joinable()) broadcast_thread.join();
+
+                if (callbacks.on_status) callbacks.on_status("Sharing cancelled.");
+                {
+                    std::lock_guard<std::mutex> lock(mtx_);
+                    socket_ = nullptr;
+                }
+                return;
+            }
+
+            if (callbacks.on_status) callbacks.on_status("Client connected. Authenticating...");
+
+            protocol::PacketHeader auth_header = transfer::MessageReceiver::receive_header(socket);
+            if (auth_header.command != static_cast<uint32_t>(protocol::CommandType::AUTH)) {
+                if (callbacks.on_error) callbacks.on_error("Expected AUTH packet, got: " + std::to_string(auth_header.command));
+                {
+                    std::lock_guard<std::mutex> lock(mtx_);
+                    socket_ = nullptr;
+                }
                 continue;
             }
-            break;
-        }
 
-        {
-            std::lock_guard<std::mutex> lock(mtx_);
-            acceptor_ = nullptr;
-        }
+            std::vector<char> auth_buf(auth_header.payload_size);
+            boost::asio::read(socket, boost::asio::buffer(auth_buf));
+            std::string received_hash(auth_buf.begin(), auth_buf.end());
 
-        broadcasting = false;
-        if (broadcast_thread.joinable()) broadcast_thread.join();
+            if (received_hash != pin_hash) {
+                if (callbacks.on_status) callbacks.on_status("Authentication FAILED. Wrong PIN.");
+                protocol::PacketHeader fail_header{static_cast<uint32_t>(protocol::CommandType::AUTH_FAIL), 0, session_id, 0};
+                transfer::MessageSender::send_header(socket, fail_header);
+                if (callbacks.on_status) callbacks.on_status("Wrong PIN entered. Waiting for correct PIN...");
+                {
+                    std::lock_guard<std::mutex> lock(mtx_);
+                    socket_ = nullptr;
+                }
+                continue;
+            }
 
-        if (accept_ec || (callbacks.cancel_flag && callbacks.cancel_flag->load())) {
-            if (callbacks.on_status) callbacks.on_status("Sharing cancelled.");
-            return;
-        }
+            broadcasting = false;
+            if (broadcast_thread.joinable()) broadcast_thread.join();
+            
+            {
+                std::lock_guard<std::mutex> lock(mtx_);
+                acceptor_ = nullptr;
+            }
 
-        if (callbacks.on_status) callbacks.on_status("Client connected. Authenticating...");
-
-        protocol::PacketHeader auth_header = transfer::MessageReceiver::receive_header(socket);
-        if (auth_header.command != static_cast<uint32_t>(protocol::CommandType::AUTH)) {
-            if (callbacks.on_error) callbacks.on_error("Expected AUTH packet, got: " + std::to_string(auth_header.command));
-            return;
-        }
-
-        std::vector<char> auth_buf(auth_header.payload_size);
-        boost::asio::read(socket, boost::asio::buffer(auth_buf));
-        std::string received_hash(auth_buf.begin(), auth_buf.end());
-
-        if (received_hash != pin_hash) {
-            if (callbacks.on_status) callbacks.on_status("Authentication FAILED. Wrong PIN.");
-            protocol::PacketHeader fail_header{static_cast<uint32_t>(protocol::CommandType::AUTH_FAIL), 0, session_id, 0};
-            transfer::MessageSender::send_header(socket, fail_header);
-            if (callbacks.on_error) callbacks.on_error("Wrong PIN entered by receiver.");
-            return;
-        }
-
-        if (callbacks.on_status) callbacks.on_status("Authenticated! Sending files...");
-        protocol::PacketHeader ok_header{static_cast<uint32_t>(protocol::CommandType::AUTH_OK), 0, session_id, 0};
-        transfer::MessageSender::send_header(socket, ok_header);
+            if (callbacks.on_status) callbacks.on_status("Authenticated! Sending files...");
+            protocol::PacketHeader ok_header{static_cast<uint32_t>(protocol::CommandType::AUTH_OK), 0, session_id, 0};
+            transfer::MessageSender::send_header(socket, ok_header);
 
         while (!jobs.empty()) {
             TransferJob job = jobs.front();
@@ -631,6 +646,13 @@ void Server::start_gui(std::queue<TransferJob> jobs, ServerCallbacks callbacks) 
                 }
             }
             jobs.pop();
+        }
+        
+        {
+            std::lock_guard<std::mutex> lock(mtx_);
+            socket_ = nullptr;
+        }
+        break;
         }
         if (callbacks.on_complete) callbacks.on_complete();
     } catch (std::exception& e) {
