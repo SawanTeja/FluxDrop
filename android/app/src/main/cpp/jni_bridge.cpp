@@ -13,25 +13,35 @@ static jobject g_server_callbacks = nullptr;
 static jobject g_client_callbacks = nullptr;
 static jobject g_discovery_callback = nullptr;
 
-static JNIEnv* get_env(bool* attached) {
+class JniThreadState {
+public:
     JNIEnv* env = nullptr;
-    jint res = g_jvm->GetEnv((void**)&env, JNI_VERSION_1_6);
-    if (res == JNI_EDETACHED) {
-        if (g_jvm->AttachCurrentThread(&env, nullptr) != 0) {
-            LOGE("Failed to attach thread");
-            return nullptr;
-        }
-        *attached = true;
-    } else {
-        *attached = false;
-    }
-    return env;
-}
+    bool needs_detach = false;
 
-static void detach_if_needed(bool attached) {
-    if (attached) {
-        g_jvm->DetachCurrentThread();
+    ~JniThreadState() {
+        if (needs_detach && g_jvm) {
+            g_jvm->DetachCurrentThread();
+        }
     }
+
+    JNIEnv* get_env() {
+        if (env) return env;
+        jint res = g_jvm->GetEnv((void**)&env, JNI_VERSION_1_6);
+        if (res == JNI_EDETACHED) {
+            if (g_jvm->AttachCurrentThread(&env, nullptr) == 0) {
+                needs_detach = true;
+            } else {
+                LOGE("Failed to attach thread");
+                return nullptr;
+            }
+        }
+        return env;
+    }
+};
+
+static JNIEnv* get_env() {
+    static thread_local JniThreadState tls_state;
+    return tls_state.get_env();
 }
 
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
@@ -63,8 +73,7 @@ Java_dev_fluxdrop_app_bridge_FluxDropCore_startServer(
     fd_start_server(c_paths.data(), count,
         // on_ready
         [](const char* ip, int port, int pin) {
-            bool attached = false;
-            JNIEnv* env = get_env(&attached);
+            JNIEnv* env = get_env();
             if (!env) return;
             jclass cls = env->GetObjectClass(g_server_callbacks);
             jmethodID mid = env->GetMethodID(cls, "onReady", "(Ljava/lang/String;II)V");
@@ -72,12 +81,10 @@ Java_dev_fluxdrop_app_bridge_FluxDropCore_startServer(
             env->CallVoidMethod(g_server_callbacks, mid, jip, port, pin);
             env->DeleteLocalRef(jip);
             env->DeleteLocalRef(cls);
-            detach_if_needed(attached);
         },
         // on_status
         [](const char* msg) {
-            bool attached = false;
-            JNIEnv* env = get_env(&attached);
+            JNIEnv* env = get_env();
             if (!env) return;
             jclass cls = env->GetObjectClass(g_server_callbacks);
             jmethodID mid = env->GetMethodID(cls, "onStatus", "(Ljava/lang/String;)V");
@@ -85,12 +92,10 @@ Java_dev_fluxdrop_app_bridge_FluxDropCore_startServer(
             env->CallVoidMethod(g_server_callbacks, mid, jmsg);
             env->DeleteLocalRef(jmsg);
             env->DeleteLocalRef(cls);
-            detach_if_needed(attached);
         },
         // on_error
         [](const char* err) {
-            bool attached = false;
-            JNIEnv* env = get_env(&attached);
+            JNIEnv* env = get_env();
             if (!env) return;
             jclass cls = env->GetObjectClass(g_server_callbacks);
             jmethodID mid = env->GetMethodID(cls, "onError", "(Ljava/lang/String;)V");
@@ -98,12 +103,10 @@ Java_dev_fluxdrop_app_bridge_FluxDropCore_startServer(
             env->CallVoidMethod(g_server_callbacks, mid, jerr);
             env->DeleteLocalRef(jerr);
             env->DeleteLocalRef(cls);
-            detach_if_needed(attached);
         },
         // on_progress
         [](const char* file, uint64_t tx, uint64_t total, double speed) {
-            bool attached = false;
-            JNIEnv* env = get_env(&attached);
+            JNIEnv* env = get_env();
             if (!env) return;
             jclass cls = env->GetObjectClass(g_server_callbacks);
             jmethodID mid = env->GetMethodID(cls, "onProgress", "(Ljava/lang/String;JJD)V");
@@ -111,12 +114,10 @@ Java_dev_fluxdrop_app_bridge_FluxDropCore_startServer(
             env->CallVoidMethod(g_server_callbacks, mid, jfile, (jlong)tx, (jlong)total, (jdouble)speed);
             env->DeleteLocalRef(jfile);
             env->DeleteLocalRef(cls);
-            detach_if_needed(attached);
         },
         // on_complete
         []() {
-            bool attached = false;
-            JNIEnv* env = get_env(&attached);
+            JNIEnv* env = get_env();
             if (!env) return;
             jclass cls = env->GetObjectClass(g_server_callbacks);
             jmethodID mid = env->GetMethodID(cls, "onComplete", "()V");
@@ -127,7 +128,6 @@ Java_dev_fluxdrop_app_bridge_FluxDropCore_startServer(
             // Wait: fd_cancel_server removes it, but if it ends safely, we should remove
             // Actually, keep it. If they call startServer again, it replaces the ref.
             // If we delete it here, a late callback could crash.
-            detach_if_needed(attached);
         }
     );
 }
@@ -151,8 +151,7 @@ Java_dev_fluxdrop_app_bridge_FluxDropCore_startDiscovery(JNIEnv* env, jobject, j
     g_discovery_callback = env->NewGlobalRef(callbackObj);
 
     fd_start_discovery((uint32_t)roomId, [](const fd_device_t* dev) {
-        bool attached = false;
-        JNIEnv* env = get_env(&attached);
+        JNIEnv* env = get_env();
         if (!env || !g_discovery_callback) return;
         jclass cls = env->GetObjectClass(g_discovery_callback);
         jmethodID mid = env->GetMethodID(cls, "onDeviceFound", "(Ljava/lang/String;IJ)V");
@@ -160,7 +159,6 @@ Java_dev_fluxdrop_app_bridge_FluxDropCore_startDiscovery(JNIEnv* env, jobject, j
         env->CallVoidMethod(g_discovery_callback, mid, jip, dev->port, (jlong)dev->session_id);
         env->DeleteLocalRef(jip);
         env->DeleteLocalRef(cls);
-        detach_if_needed(attached);
     });
 }
 
@@ -185,8 +183,7 @@ Java_dev_fluxdrop_app_bridge_FluxDropCore_connect(
     fd_connect(ip, port, pin, saveDir,
         // on_status
         [](const char* msg) {
-            bool attached = false;
-            JNIEnv* env = get_env(&attached);
+            JNIEnv* env = get_env();
             if (!env || !g_client_callbacks) return;
             jclass cls = env->GetObjectClass(g_client_callbacks);
             jmethodID mid = env->GetMethodID(cls, "onStatus", "(Ljava/lang/String;)V");
@@ -194,12 +191,10 @@ Java_dev_fluxdrop_app_bridge_FluxDropCore_connect(
             env->CallVoidMethod(g_client_callbacks, mid, jmsg);
             env->DeleteLocalRef(jmsg);
             env->DeleteLocalRef(cls);
-            detach_if_needed(attached);
         },
         // on_error
         [](const char* err) {
-            bool attached = false;
-            JNIEnv* env = get_env(&attached);
+            JNIEnv* env = get_env();
             if (!env || !g_client_callbacks) return;
             jclass cls = env->GetObjectClass(g_client_callbacks);
             jmethodID mid = env->GetMethodID(cls, "onError", "(Ljava/lang/String;)V");
@@ -207,12 +202,10 @@ Java_dev_fluxdrop_app_bridge_FluxDropCore_connect(
             env->CallVoidMethod(g_client_callbacks, mid, jerr);
             env->DeleteLocalRef(jerr);
             env->DeleteLocalRef(cls);
-            detach_if_needed(attached);
         },
         // on_file_request
         [](const char* file, uint64_t size) -> bool {
-            bool attached = false;
-            JNIEnv* env = get_env(&attached);
+            JNIEnv* env = get_env();
             if (!env || !g_client_callbacks) return true;
             jclass cls = env->GetObjectClass(g_client_callbacks);
             jmethodID mid = env->GetMethodID(cls, "onFileRequest", "(Ljava/lang/String;J)Z");
@@ -220,13 +213,11 @@ Java_dev_fluxdrop_app_bridge_FluxDropCore_connect(
             jboolean result = env->CallBooleanMethod(g_client_callbacks, mid, jfile, (jlong)size);
             env->DeleteLocalRef(jfile);
             env->DeleteLocalRef(cls);
-            detach_if_needed(attached);
             return result == JNI_TRUE;
         },
         // on_progress
         [](const char* file, uint64_t tx, uint64_t total, double speed) {
-            bool attached = false;
-            JNIEnv* env = get_env(&attached);
+            JNIEnv* env = get_env();
             if (!env || !g_client_callbacks) return;
             jclass cls = env->GetObjectClass(g_client_callbacks);
             jmethodID mid = env->GetMethodID(cls, "onProgress", "(Ljava/lang/String;JJD)V");
@@ -234,18 +225,15 @@ Java_dev_fluxdrop_app_bridge_FluxDropCore_connect(
             env->CallVoidMethod(g_client_callbacks, mid, jfile, (jlong)tx, (jlong)total, (jdouble)speed);
             env->DeleteLocalRef(jfile);
             env->DeleteLocalRef(cls);
-            detach_if_needed(attached);
         },
         // on_complete
         []() {
-            bool attached = false;
-            JNIEnv* env = get_env(&attached);
+            JNIEnv* env = get_env();
             if (!env || !g_client_callbacks) return;
             jclass cls = env->GetObjectClass(g_client_callbacks);
             jmethodID mid = env->GetMethodID(cls, "onComplete", "()V");
             env->CallVoidMethod(g_client_callbacks, mid);
             env->DeleteLocalRef(cls);
-            detach_if_needed(attached);
         }
     );
 
