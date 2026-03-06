@@ -273,11 +273,19 @@ void on_connect_btn_clicked(GtkButton* /*btn*/, gpointer data) {
         FD_ERR("Client error: " << err);
         uint64_t gen = g_recv_gen.load();
         g_client_panel->transferring_ = false;
+        // Truncate verbose Boost error strings for user display
+        std::string msg(err);
+        auto bracket = msg.find('[');
+        if (bracket != std::string::npos && bracket > 0) {
+            msg = msg.substr(0, bracket);
+            while (!msg.empty() && (msg.back() == ' ' || msg.back() == ':')) msg.pop_back();
+        }
         g_idle_add(recv_complete_idle, new RecvReenableData{
             g_client_panel->cancel_button_, g_client_panel->progress_bar_,
             g_client_panel->status_label_, g_client_panel->progress_label_,
-            "❌ " + std::string(err), gen
+            "Error: " + msg, gen
         });
+        g_client_panel->clear_and_restart_discovery();
     };
 
     auto file_request_cb = [](const char* filename, uint64_t size) -> bool {
@@ -316,6 +324,7 @@ void on_connect_btn_clicked(GtkButton* /*btn*/, gpointer data) {
             g_client_panel->status_label_, g_client_panel->progress_label_,
             "✅ All files received!", gen
         });
+        g_client_panel->clear_and_restart_discovery();
     };
 
     auto dev = cd->device;
@@ -511,6 +520,9 @@ G_GNUC_END_IGNORE_DEPRECATIONS
 
     status_label_ = gtk_label_new("");
     gtk_widget_add_css_class(status_label_, "status-text");
+    gtk_label_set_wrap(GTK_LABEL(status_label_), TRUE);
+    gtk_label_set_wrap_mode(GTK_LABEL(status_label_), PANGO_WRAP_WORD_CHAR);
+    gtk_label_set_max_width_chars(GTK_LABEL(status_label_), 50);
     gtk_box_append(GTK_BOX(section), status_label_);
 
     progress_bar_ = gtk_progress_bar_new();
@@ -586,6 +598,27 @@ void DeviceListPanel::on_device_found(const networking::DiscoveredDevice& device
 
     FD_LOG("Device found: " << key);
     g_idle_add(add_device_row_idle, new AddRowData{list_box_, device});
+}
+
+void DeviceListPanel::clear_and_restart_discovery() {
+    FD_LOG("Clearing stale device list and restarting discovery");
+    {
+        std::lock_guard<std::mutex> lock(devices_mutex_);
+        devices_.clear();
+    }
+    // Clear list box rows on the GTK main thread
+    GtkWidget* lb = list_box_;
+    g_idle_add(+[](gpointer data) -> gboolean {
+        GtkWidget* list_box = static_cast<GtkWidget*>(data);
+        if (!GTK_IS_LIST_BOX(list_box)) return G_SOURCE_REMOVE;
+        GtkWidget* child;
+        while ((child = gtk_widget_get_first_child(list_box)) != nullptr) {
+            gtk_list_box_remove(GTK_LIST_BOX(list_box), child);
+        }
+        return G_SOURCE_REMOVE;
+    }, lb);
+    stop_discovery();
+    start_discovery();
 }
 
 void DeviceListPanel::row_activated_cb(GtkListBox* /*list_box*/, GtkListBoxRow* row, gpointer user_data) {

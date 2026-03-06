@@ -40,6 +40,7 @@ private:
 
     void on_device_found(const networking::DiscoveredDevice& device);
     void connect_to_device(const networking::DiscoveredDevice& device);
+    void clear_and_restart_discovery();
 
     static void row_activated_cb(GtkListBox* list_box, GtkListBoxRow* row, gpointer user_data);
 };
