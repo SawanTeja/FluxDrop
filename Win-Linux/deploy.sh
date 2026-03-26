@@ -125,7 +125,6 @@ MINGW_SHARE="${MINGW_ROOT}/share"
 
 if [ "$#" -eq 0 ]; then
     set -- \
-        "${REPO_ROOT}/build/fluxdrop.exe" \
         "${REPO_ROOT}/Win-Linux/build/fluxdrop_gui.exe"
 fi
 
