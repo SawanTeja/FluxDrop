@@ -14,6 +14,16 @@ namespace fs = std::filesystem;
 
 #define CORE_LOG(msg) std::cerr << "[FD-CORE] " << msg << std::endl
 
+namespace {
+
+constexpr uint32_t kDefaultRoomId = 482913;
+
+std::string to_protocol_relative_path(const fs::path& path) {
+    return path.generic_string();
+}
+
+} // namespace
+
 // Global Instances
 
 static std::unique_ptr<networking::Server> g_server;
@@ -61,20 +71,26 @@ void fd_start_server(const char** file_paths, int num_files,
     g_server_cancel_flag = false;
 
     std::queue<networking::TransferJob> jobs;
-    uint32_t room_id = 482913;
+    uint32_t room_id = kDefaultRoomId;
 
     for (int i = 0; i < num_files; ++i) {
-        fs::path path(file_paths[i]);
+        fs::path path = fs::path(file_paths[i]).lexically_normal();
         if (fs::is_directory(path)) {
-            std::string base_dir = path.filename().string();
-            for (const auto& entry : fs::recursive_directory_iterator(path)) {
-                if (entry.is_regular_file()) {
-                    fs::path relative = base_dir / fs::relative(entry.path(), path);
-                    jobs.push({entry.path().string(), relative.string(), room_id});
+            fs::path base_dir = path.filename();
+            if (base_dir.empty()) {
+                base_dir = path.root_name();
+            }
+            std::error_code iter_ec;
+            fs::recursive_directory_iterator end;
+            for (fs::recursive_directory_iterator it(path, fs::directory_options::skip_permission_denied, iter_ec);
+                 it != end && !iter_ec; it.increment(iter_ec)) {
+                if (it->is_regular_file()) {
+                    fs::path relative = base_dir / fs::relative(it->path(), path);
+                    jobs.push({it->path().string(), to_protocol_relative_path(relative), room_id});
                 }
             }
         } else if (fs::is_regular_file(path)) {
-            jobs.push({path.string(), path.filename().string(), room_id});
+            jobs.push({path.string(), to_protocol_relative_path(path.filename()), room_id});
         }
     }
 
@@ -142,7 +158,7 @@ void fd_start_discovery(uint32_t room_id, fd_client_device_found_cb found_cb) {
     if (!g_discovery) {
         g_discovery = std::make_unique<networking::DiscoveryListener>();
     }
-    g_discovery->start([found_cb](const networking::DiscoveredDevice& d) {
+    g_discovery->start(room_id, [found_cb](const networking::DiscoveredDevice& d) {
         if (found_cb) {
             static thread_local std::string ip_storage;
             ip_storage = d.ip;
@@ -206,7 +222,9 @@ void fd_connect(const char* ip, int port, const char* pin, const char* save_dir,
 
     g_client_thread = std::thread([c = g_client.get(), ip_str, port, pin_str, dir_str, callbacks]() {
         CORE_LOG("Client thread started — connecting to " << ip_str << ":" << port);
-        fs::create_directories(dir_str);
+        if (!dir_str.empty()) {
+            fs::create_directories(dir_str);
+        }
         c->connect_gui(ip_str, port, pin_str, dir_str, callbacks);
         CORE_LOG("Client thread finished");
     });

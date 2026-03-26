@@ -1,6 +1,7 @@
 #include "ui/file_sender.hpp"
 #include "ui/transfer_dialog.hpp"
 #include "logger.hpp"
+#include <algorithm>
 #include <iostream>
 #include <filesystem>
 #include "fluxdrop_core.h"
@@ -251,15 +252,22 @@ FileSenderPanel::~FileSenderPanel() {
 
 void FileSenderPanel::add_path(const std::string& path) {
     FD_LOG("Adding path: " << path);
-    fs::path p(path);
-    if (fs::is_directory(p)) {
-        for (const auto& entry : fs::recursive_directory_iterator(p)) {
-            if (entry.is_regular_file()) {
-                queued_files_.push_back(entry.path().string());
-            }
-        }
-    } else if (fs::is_regular_file(p)) {
-        queued_files_.push_back(path);
+    fs::path p = fs::path(path).lexically_normal();
+
+    std::error_code ec;
+    if (!fs::exists(p, ec)) {
+        FD_WARN("Ignoring missing path: " << p.string());
+        return;
+    }
+
+    const std::string normalized = p.string();
+    if (std::find(queued_files_.begin(), queued_files_.end(), normalized) != queued_files_.end()) {
+        FD_WARN("Skipping duplicate queued path: " << normalized);
+        return;
+    }
+
+    if (fs::is_directory(p, ec) || fs::is_regular_file(p, ec)) {
+        queued_files_.push_back(normalized);
     }
     FD_LOG("Total queued files: " << queued_files_.size());
     update_file_list_ui();

@@ -3,6 +3,7 @@
 #include "security.hpp"
 #include "protocol/packet.hpp"
 #include "protocol/file_meta.hpp"
+#include <algorithm>
 #include <iostream>
 #include <boost/asio.hpp>
 #include <thread>
@@ -10,12 +11,8 @@
 #include <iomanip>
 #include <filesystem>
 #include <random>
+#include <stdexcept>
 
-#ifdef _WIN32
-  #include <windows.h>
-#else
-  #include <sys/statvfs.h>
-#endif
 #ifdef __ANDROID__
   #include <ifaddrs.h>
   #include <netinet/in.h>
@@ -25,6 +22,73 @@
 using boost::asio::ip::tcp;
 
 namespace networking {
+
+namespace fs = std::filesystem;
+
+namespace {
+
+uint64_t decode_resume_offset(const protocol::PacketHeader& header) {
+    return (static_cast<uint64_t>(header.reserved) << 32) | header.payload_size;
+}
+
+protocol::PacketHeader make_resume_header(uint32_t session_id, uint64_t resume_offset) {
+    return {
+        static_cast<uint32_t>(protocol::CommandType::RESUME),
+        static_cast<uint32_t>(resume_offset & 0xFFFFFFFFull),
+        session_id,
+        static_cast<uint32_t>(resume_offset >> 32)
+    };
+}
+
+fs::path sanitize_relative_save_path(const std::string& remote_name) {
+    std::string normalized = remote_name;
+    std::replace(normalized.begin(), normalized.end(), '\\', '/');
+
+    fs::path parsed(normalized);
+    if (parsed.is_absolute() || parsed.has_root_name() || parsed.has_root_directory()) {
+        throw std::runtime_error("Sender provided an absolute file path.");
+    }
+
+    fs::path sanitized;
+    for (const auto& part : parsed) {
+        std::string token = part.generic_string();
+        if (token.empty() || token == ".") {
+            continue;
+        }
+        if (token == "..") {
+            throw std::runtime_error("Sender tried to write outside the selected folder.");
+        }
+        sanitized /= part;
+    }
+
+    if (sanitized.empty()) {
+        throw std::runtime_error("Sender provided an empty file name.");
+    }
+
+    return sanitized.lexically_normal();
+}
+
+uint64_t available_space_for_target(const fs::path& target_path) {
+    std::error_code ec;
+    fs::path probe = target_path;
+
+    if (!fs::exists(probe, ec)) {
+        probe = probe.parent_path();
+    }
+
+    while (!probe.empty() && !fs::exists(probe, ec)) {
+        probe = probe.parent_path();
+    }
+
+    if (probe.empty()) {
+        probe = fs::current_path(ec);
+    }
+
+    const auto space_info = fs::space(probe, ec);
+    return ec ? 0 : space_info.available;
+}
+
+} // namespace
 
 std::string get_local_ip(boost::asio::io_context& io_context) {
 #ifdef __ANDROID__
@@ -199,7 +263,7 @@ void Server::start(std::queue<TransferJob> jobs) {
                     transfer::MessageSender::send_file(socket, job.filepath, header.session_id);
                     job_done = true;
                 } else if (header.command == static_cast<uint32_t>(protocol::CommandType::RESUME)) {
-                    uint64_t resume_offset = header.payload_size;
+                    uint64_t resume_offset = decode_resume_offset(header);
                     std::cout << "Client requested RESUME for " << file_info.filename << " from offset: " << resume_offset << " bytes.\n";
                     transfer::MessageSender::send_file(socket, job.filepath, header.session_id, resume_offset);
                     job_done = true;
@@ -325,19 +389,20 @@ void Client::connect(const std::string& ip, unsigned short port) {
                 protocol::FileInfo meta = transfer::MessageReceiver::receive_file_meta(socket, header.payload_size);
                 
                 std::cout << "\nIncoming file: " << meta.filename << " (" << format_size(meta.size) << ")\n";
-                
-                uint64_t available_space = 0;
-#ifdef _WIN32
-                ULARGE_INTEGER free_bytes;
-                if (GetDiskFreeSpaceExA(".", &free_bytes, nullptr, nullptr)) {
-                    available_space = free_bytes.QuadPart;
+
+                fs::path relative_path;
+                try {
+                    relative_path = sanitize_relative_save_path(meta.filename);
+                } catch (const std::exception& ex) {
+                    std::cout << "Rejecting file: " << ex.what() << "\n";
+                    protocol::PacketHeader reject_header{static_cast<uint32_t>(protocol::CommandType::CANCEL), 0, header.session_id, 0};
+                    transfer::MessageSender::send_header(socket, reject_header);
+                    continue;
                 }
-#else
-                struct statvfs disk_stat;
-                if (statvfs(".", &disk_stat) == 0) {
-                    available_space = static_cast<uint64_t>(disk_stat.f_bavail) * disk_stat.f_frsize;
-                }
-#endif
+
+                fs::path base_dir = save_dir.empty() ? fs::current_path() : fs::path(save_dir);
+                fs::path save_path = (base_dir / relative_path).lexically_normal();
+                uint64_t available_space = available_space_for_target(save_path);
                 if (available_space > 0 && available_space < meta.size) {
                     std::cout << "Error: Insufficient disk space! Requires " << format_size(meta.size) 
                               << " but only " << format_size(available_space) << " available.\n";
@@ -348,10 +413,10 @@ void Client::connect(const std::string& ip, unsigned short port) {
                 }
 
                 uint64_t resume_offset = 0;
-                std::string save_path = save_dir + "/" + meta.filename;
-                std::string part_file = save_path + ".fluxpart";
+                std::string save_path_string = save_path.string();
+                std::string part_file = save_path_string + ".fluxpart";
                 std::error_code ec;
-                auto part_size = std::filesystem::file_size(part_file, ec);
+                auto part_size = fs::file_size(part_file, ec);
                 if (!ec) {
                     resume_offset = part_size;
                     std::cout << "Found partial download. " << format_size(resume_offset) << " out of " << format_size(meta.size) << " downloaded.\n";
@@ -364,7 +429,7 @@ void Client::connect(const std::string& ip, unsigned short port) {
                 if (answer == "y" || answer == "Y") {
                     if (resume_offset > 0) {
                         std::cout << "Resuming file transfer from offset...\n";
-                        protocol::PacketHeader resume_header{static_cast<uint32_t>(protocol::CommandType::RESUME), static_cast<uint32_t>(resume_offset), header.session_id, 0};
+                        protocol::PacketHeader resume_header = make_resume_header(header.session_id, resume_offset);
                         transfer::MessageSender::send_header(socket, resume_header);
                     } else {
                         std::cout << "File accepted. Downloading...\n";
@@ -372,7 +437,7 @@ void Client::connect(const std::string& ip, unsigned short port) {
                         transfer::MessageSender::send_header(socket, accept_header);
                     }
                     
-                    transfer::TransferState state = transfer::MessageReceiver::receive_file(socket, save_path, meta.size, resume_offset);
+                    transfer::TransferState state = transfer::MessageReceiver::receive_file(socket, save_path_string, meta.size, resume_offset);
                     if (state == transfer::TransferState::COMPLETED) {
                         std::cout << "Download complete!\n";
                     } else if (state == transfer::TransferState::CANCELLED) {
@@ -402,11 +467,11 @@ DiscoveryListener::~DiscoveryListener() {
     stop();
 }
 
-void DiscoveryListener::start(DeviceFoundCallback callback) {
+void DiscoveryListener::start(uint32_t room_id, DeviceFoundCallback callback) {
     if (running_) return;
     running_ = true;
 
-    thread_ = std::thread([this, callback]() {
+    thread_ = std::thread([this, room_id, callback]() {
         try {
             boost::asio::io_context io_context;
             boost::asio::ip::udp::socket socket(io_context,
@@ -457,6 +522,7 @@ void DiscoveryListener::start(DeviceFoundCallback callback) {
                         }
 
                         if (instance_id == get_instance_id()) continue;
+                        if (device.session_id != room_id) continue;
 
                         device.ip = sender_ip;
                         if (callback) callback(device);
@@ -635,7 +701,7 @@ void Server::start_gui(std::queue<TransferJob> jobs, ServerCallbacks callbacks) 
                     transfer::MessageSender::send_file(socket, job.filepath, header.session_id, 0, callbacks.on_progress, callbacks.cancel_flag);
                     job_done = true;
                 } else if (header.command == static_cast<uint32_t>(protocol::CommandType::RESUME)) {
-                    uint64_t offset = header.payload_size;
+                    uint64_t offset = decode_resume_offset(header);
                     transfer::MessageSender::send_file(socket, job.filepath, header.session_id, offset, callbacks.on_progress, callbacks.cancel_flag);
                     job_done = true;
                 } else if (header.command == static_cast<uint32_t>(protocol::CommandType::CANCEL)) {
@@ -720,20 +786,21 @@ void Client::connect_gui(const std::string& ip, unsigned short port,
             if (header.command == static_cast<uint32_t>(protocol::CommandType::FILE_META)) {
                 protocol::FileInfo meta = transfer::MessageReceiver::receive_file_meta(socket, header.payload_size);
 
-                if (callbacks.on_status) callbacks.on_status("Receiving: " + meta.filename + " (" + format_size(meta.size) + ")");
+                fs::path relative_path;
+                try {
+                    relative_path = sanitize_relative_save_path(meta.filename);
+                } catch (const std::exception& ex) {
+                    if (callbacks.on_error) callbacks.on_error(ex.what());
+                    protocol::PacketHeader reject_header{static_cast<uint32_t>(protocol::CommandType::CANCEL), 0, header.session_id, 0};
+                    transfer::MessageSender::send_header(socket, reject_header);
+                    continue;
+                }
 
-                uint64_t available_space = 0;
-#ifdef _WIN32
-                ULARGE_INTEGER free_bytes;
-                if (GetDiskFreeSpaceExA(".", &free_bytes, nullptr, nullptr)) {
-                    available_space = free_bytes.QuadPart;
-                }
-#else
-                struct statvfs disk_stat;
-                if (statvfs(".", &disk_stat) == 0) {
-                    available_space = static_cast<uint64_t>(disk_stat.f_bavail) * disk_stat.f_frsize;
-                }
-#endif
+                if (callbacks.on_status) callbacks.on_status("Receiving: " + relative_path.generic_string() + " (" + format_size(meta.size) + ")");
+
+                fs::path base_dir = save_dir.empty() ? fs::current_path() : fs::path(save_dir);
+                fs::path save_path = (base_dir / relative_path).lexically_normal();
+                uint64_t available_space = available_space_for_target(save_path);
                 if (available_space > 0 && available_space < meta.size) {
                     if (callbacks.on_error) callbacks.on_error("Insufficient disk space. Requires " + format_size(meta.size) + " but only " + format_size(available_space) + " available.");
                     protocol::PacketHeader reject_header{static_cast<uint32_t>(protocol::CommandType::CANCEL), 0, header.session_id, 0};
@@ -749,23 +816,22 @@ void Client::connect_gui(const std::string& ip, unsigned short port,
                 if (!acc) {
                     protocol::PacketHeader reject_header{static_cast<uint32_t>(protocol::CommandType::CANCEL), 0, header.session_id, 0};
                     transfer::MessageSender::send_header(socket, reject_header);
-                    if (callbacks.on_status) callbacks.on_status("Skipped: " + meta.filename);
+                    if (callbacks.on_status) callbacks.on_status("Skipped: " + relative_path.generic_string());
                     continue;
                 }
 
-                std::string save_path = save_dir.empty() ? meta.filename : (save_dir + "/" + meta.filename);
-
                 uint64_t resume_offset = 0;
-                std::string part_file = save_path + ".fluxpart";
+                std::string save_path_string = save_path.string();
+                std::string part_file = save_path_string + ".fluxpart";
                 std::error_code ec;
-                auto part_size = std::filesystem::file_size(part_file, ec);
+                auto part_size = fs::file_size(part_file, ec);
                 if (!ec) {
                     resume_offset = part_size;
                     if (callbacks.on_status) callbacks.on_status("Resuming from " + format_size(resume_offset));
                 }
 
                 if (resume_offset > 0) {
-                    protocol::PacketHeader resume_header{static_cast<uint32_t>(protocol::CommandType::RESUME), static_cast<uint32_t>(resume_offset), header.session_id, 0};
+                    protocol::PacketHeader resume_header = make_resume_header(header.session_id, resume_offset);
                     transfer::MessageSender::send_header(socket, resume_header);
                 } else {
                     protocol::PacketHeader accept{static_cast<uint32_t>(protocol::CommandType::PONG), 0, header.session_id, 0};
@@ -773,15 +839,15 @@ void Client::connect_gui(const std::string& ip, unsigned short port,
                 }
 
                 transfer::TransferState state = transfer::MessageReceiver::receive_file(
-                    socket, save_path, meta.size, resume_offset, callbacks.on_progress, callbacks.cancel_flag);
+                    socket, save_path_string, meta.size, resume_offset, callbacks.on_progress, callbacks.cancel_flag);
 
                 if (state == transfer::TransferState::COMPLETED) {
-                    if (callbacks.on_status) callbacks.on_status("Received: " + meta.filename);
+                    if (callbacks.on_status) callbacks.on_status("Received: " + relative_path.generic_string());
                 } else if (state == transfer::TransferState::CANCELLED) {
-                     if (callbacks.on_status) callbacks.on_status("Cancelled: " + meta.filename);
+                     if (callbacks.on_status) callbacks.on_status("Cancelled: " + relative_path.generic_string());
                      break;
                 } else if (state == transfer::TransferState::FAILED) {
-                    if (callbacks.on_error) callbacks.on_error("Failed to receive: " + meta.filename);
+                    if (callbacks.on_error) callbacks.on_error("Failed to receive: " + relative_path.generic_string());
                     break;
                 }
             } else if (header.command == static_cast<uint32_t>(protocol::CommandType::PING)) {

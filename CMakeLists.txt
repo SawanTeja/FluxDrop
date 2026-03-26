@@ -12,7 +12,6 @@ find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
 find_package(nlohmann_json REQUIRED)
 pkg_check_modules(SODIUM REQUIRED libsodium)
-pkg_check_modules(GTK4 REQUIRED gtk4)
 
 # --- Core Library ---
 add_library(fluxdrop_core STATIC

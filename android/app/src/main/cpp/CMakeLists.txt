@@ -11,8 +11,32 @@ set(CORE_INC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../include")
 
 # Boost (header-only Asio)
 set(BOOST_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/boost")
-include_directories(${BOOST_ROOT})
-add_definitions(-DBOOST_ASIO_NO_DEPRECATED)
+set(BOOST_INCLUDE_DIR "")
+
+if (EXISTS "${BOOST_ROOT}/boost/asio.hpp")
+    set(BOOST_INCLUDE_DIR "${BOOST_ROOT}")
+elseif (EXISTS "C:/msys64/mingw64/include/boost/asio.hpp")
+    set(BOOST_INCLUDE_DIR "C:/msys64/mingw64/include")
+else()
+    find_path(BOOST_INCLUDE_DIR
+        NAMES boost/asio.hpp
+        PATHS
+            "$ENV{BOOST_ROOT}"
+            "$ENV{MINGW_PREFIX}/include"
+            "/usr/local/include"
+            "/usr/include"
+        NO_CMAKE_FIND_ROOT_PATH
+    )
+endif()
+
+if (NOT BOOST_INCLUDE_DIR)
+    message(FATAL_ERROR
+        "Boost headers were not found. Add android/app/src/main/cpp/third_party/boost "
+        "or install Boost headers locally so boost/asio.hpp is available.")
+endif()
+
+include_directories(${BOOST_INCLUDE_DIR})
+add_definitions(-DBOOST_ASIO_NO_DEPRECATED -DBOOST_ERROR_CODE_HEADER_ONLY)
 
 # nlohmann_json (header-only)
 set(JSON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/nlohmann")

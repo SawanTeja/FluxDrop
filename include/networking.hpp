@@ -52,7 +52,7 @@ struct ClientCallbacks {
 class DiscoveryListener {
 public:
     ~DiscoveryListener();
-    void start(DeviceFoundCallback callback);
+    void start(uint32_t room_id, DeviceFoundCallback callback);
     void stop();
     bool is_running() const { return running_; }
 

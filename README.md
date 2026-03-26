@@ -4,7 +4,7 @@ A fast, secure, cross-platform peer-to-peer file transfer tool for local network
 
 ## Features
 
-- **Cross-Platform** - Linux (CLI and GTK4 GUI), Windows (CLI), Android (Jetpack Compose)
+- **Cross-Platform** - Linux and Windows (CLI + GTK4 desktop app), Android (Jetpack Compose)
 - **P2P LAN Transfer** - Direct TCP connections, no cloud required
 - **Auto-Discovery** - UDP broadcast and multicast discovery for peers
 - **Manual IP Connect** - Fallback for hotspot networks where discovery fails
@@ -38,7 +38,7 @@ FluxDrop/
 │   ├── packet.cpp            # Binary protocol serialization
 │   └── main.cpp              # CLI entry point (Linux/Windows)
 │
-├── linux/                    # Linux GTK4 GUI
+├── Win-Linux/                # Windows/Linux GTK4 desktop app
 │   ├── CMakeLists.txt
 │   ├── include/ui/           # GUI panel headers
 │   └── src/ui/               # GTK4 implementation
@@ -51,7 +51,7 @@ FluxDrop/
 │   └── app/src/main/
 │       ├── cpp/
 │       │   ├── jni_bridge.cpp        # JNI ↔ C API bridge
-│       │   └── third_party/          # Boost, libsodium, spdlog headers
+│       │   └── third_party/          # Android native deps (nlohmann, boost, libsodium)
 │       └── java/dev/fluxdrop/app/
 │           ├── bridge/FluxDropCore.kt  # Kotlin ↔ JNI interface
 │           ├── ui/screens/
@@ -71,74 +71,25 @@ The transfer engine is exposed as a **C API** (`fluxdrop_core.h`), designed for 
 
 See **[API.md](API.md)** for the full reference: types, functions, callbacks, protocol format, discovery protocol, and integration guide.
 
+For full platform setup, build, and run steps, use **[BUILD_AND_RUN_GUIDE.md](BUILD_AND_RUN_GUIDE.md)**.
+
 ---
 
 ## Building
 
-### Prerequisites
+Use **[BUILD_AND_RUN_GUIDE.md](BUILD_AND_RUN_GUIDE.md)** as the source of truth for setup, build, and run steps.
 
-| Dependency    | Purpose              | Fedora                          | Ubuntu/Debian                  |
-|---------------|----------------------|---------------------------------|--------------------------------|
-| CMake ≥ 3.10  | Build system         | `sudo dnf install cmake`        | `sudo apt install cmake`       |
-| C++20         | Core language        | `sudo dnf install gcc-c++`      | `sudo apt install g++`         |
-| Boost         | Networking (Asio)    | `sudo dnf install boost-devel`  | `sudo apt install libboost-all-dev` |
-| libsodium     | PIN hashing          | `sudo dnf install libsodium-devel` | `sudo apt install libsodium-dev` |
-| nlohmann-json | JSON metadata        | `sudo dnf install json-devel`   | `sudo apt install nlohmann-json3-dev` |
-| pkg-config    | Dep resolution       | `sudo dnf install pkgconf-pkg-config` | `sudo apt install pkg-config` |
-| GTK4          | Linux GUI only       | `sudo dnf install gtk4-devel`   | `sudo apt install libgtk-4-dev` |
+Quick summary:
 
-#### One-liner install
+- **Windows (MSYS2 MinGW32):** install `mingw-w64-i686-*` dependencies, build the root project first, then build `Win-Linux/`
+- **Linux:** install the CLI/core dependencies, add GTK4 if you want the desktop app, then build the root project first and `Win-Linux/` second
+- **Android:** use **JDK 17 or JDK 21**, install SDK 34 + NDK + CMake 3.22.1, and make sure `android/app/src/main/cpp/third_party/boost` and `android/app/src/main/cpp/third_party/libsodium` exist before running Gradle
 
-**Fedora:**
-```bash
-sudo dnf install cmake gcc-c++ boost-devel libsodium-devel json-devel pkgconf-pkg-config gtk4-devel
-```
+Main outputs:
 
-**Ubuntu/Debian:**
-```bash
-sudo apt install cmake g++ libboost-all-dev libsodium-dev nlohmann-json3-dev pkg-config libgtk-4-dev
-```
-
-**Windows (MSYS2 UCRT64):**
-```bash
-pacman -S mingw-w64-ucrt-x86_64-{gcc,cmake,pkgconf,boost,libsodium,nlohmann-json,gtk4}
-```
-
-### Build Commands
-
-#### Linux CLI
-```bash
-cd ~/FluxDrop
-mkdir -p build && cd build
-cmake ..
-make -j$(nproc)
-# Binary: build/fluxdrop
-```
-
-#### Linux GUI
-```bash
-cd ~/FluxDrop/linux
-mkdir -p build && cd build
-cmake ..
-make -j$(nproc)
-# Binary: build/fluxdrop_gui
-```
-
-#### Windows (MSYS2)
-```bash
-cd /c/path/to/FluxDrop
-mkdir -p build && cd build
-cmake -G "MinGW Makefiles" ..
-cmake --build . -j%NUMBER_OF_PROCESSORS%
-# Binary: build/fluxdrop.exe
-```
-
-#### Android
-```bash
-cd ~/FluxDrop/android
-./gradlew assembleDebug
-# APK: app/build/outputs/apk/debug/app-debug.apk
-```
+- CLI: `build/fluxdrop` or `build/fluxdrop.exe`
+- Desktop GUI: `Win-Linux/build/fluxdrop_gui` or `Win-Linux/build/fluxdrop_gui.exe`
+- Android APK: `android/app/build/outputs/apk/debug/app-debug.apk`
 
 ---
 
@@ -157,7 +108,7 @@ cd ~/FluxDrop/android
 ~/FluxDrop/build/fluxdrop connect <ip> <port>
 ```
 
-### Linux GUI
+### Desktop GUI
 
 Launch `fluxdrop_gui`. Use the **Send** tab to pick files and share (shows PIN). Use the **Receive** tab to discover senders or click **Connect by IP** for manual entry.
 
@@ -182,6 +133,7 @@ Open the app. Use the **Send** tab to select files. Use the **Receive** tab to d
 | Connection refused | Verify sender is running; check TCP port isn't blocked |
 | Discovery fails on hotspot | Use "Connect by IP" and enter the sender's IP:port manually, common issue with Android devices |
 | `libsodium initialization failed` | Reinstall libsodium-devel, rebuild |
+| Windows says a `*.dll` file is missing | From the MSYS2 MinGW shell, run `sh Win-Linux/deploy.sh build/fluxdrop.exe Win-Linux/build/fluxdrop_gui.exe` to copy all required runtime DLLs beside both Windows executables |
 | Build fails on nlohmann/json | Install `json-devel` (Fedora) or `nlohmann-json3-dev` (Ubuntu) |
 | Wrong PIN repeatedly | Restart sender to generate a new PIN |
 | `.fluxpart` file left behind | Partial download from interrupted transfer; resume or delete |

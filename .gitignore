@@ -1,58 +1,52 @@
-build
+build/
 build.txt
+connect.txt
+connect.log
+Plan.md
+
+# Common local build outputs
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+build.ninja
+.ninja_deps
+.ninja_log
+compile_commands.json
+.gradle-user-home/
+
+# Local core library outputs
 libfluxdrop_core.a
 libfluxdrop_core.so
 libfluxdrop_core.dylib
 libfluxdrop_core.lib
 libfluxdrop_core.dll
-connect.txt
-connect.log
-Plan.md
 
-# ── Android ──────────────────────────────────────
-
-# Gradle
+# Android
 android/.gradle/
 android/build/
 android/app/build/
 android/build.log
-
-# Android Studio / IntelliJ IDEA
 android/.idea/
 *.iml
-
-# Local properties (contains local SDK path – machine-specific)
 android/local.properties
-
-# Native (CMake / ndk-build) build caches
 android/app/.cxx/
-
-# Third-party sources & tarballs (fetched at build time)
-# Third-party sources & tarballs (fetched at build time)
 android/app/src/main/cpp/third_party/libsodium-*.tar.gz
 android/app/src/main/cpp/third_party/boost.tar.gz
 android/app/src/main/cpp/third_party/libsodium/
 android/app/src/main/cpp/third_party/boost/
-
-
-# Signing configs
 android/*.jks
 android/*.keystore
 android/keystore.properties
+*.apk
+*.aab
 
-android/.gradle/buildOutputCleanup/buildOutputCleanup.lock
-android/.gradle/buildOutputCleanup/outputFiles.bin
-
-/home/sawan/FluxDrop/android/.gradle
-
-# ── AppImage ──────────────────────────────────────
+# AppImage / Linux packaging
 FluxDrop.AppDir/
 squashfs-root/
 *.AppImage
 appimagetool-x86_64.AppImage
 linuxdeploy-x86_64.AppImage
 linuxdeploy-plugin-gtk.sh
-linux/build/
 
-FluxDrop-standalone.apk
-
+BUILD_AND_RUN_GUIDE.md
+report.md

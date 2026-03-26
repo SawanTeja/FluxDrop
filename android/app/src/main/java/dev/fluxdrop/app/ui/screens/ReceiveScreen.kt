@@ -79,6 +79,7 @@ fun ReceiveScreen(modifier: Modifier = Modifier) {
     }
 
     LaunchedEffect(selectedDevice) {
+        FluxDropCore.stopDiscovery()
         if (selectedDevice == null) {
             devices = emptyList()
             FluxDropCore.startDiscovery(482913, object : DeviceFoundCallback {
@@ -89,6 +90,8 @@ fun ReceiveScreen(modifier: Modifier = Modifier) {
                     }
                 }
             })
+        } else {
+            status = "Ready to connect to ${selectedDevice?.ip}"
         }
     }
 

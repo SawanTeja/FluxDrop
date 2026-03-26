@@ -8,6 +8,34 @@
 
 namespace transfer {
 
+namespace fs = std::filesystem;
+
+namespace {
+
+bool replace_with_completed_file(const fs::path& part_path, const fs::path& final_path) {
+    std::error_code ec;
+
+    if (fs::exists(final_path, ec)) {
+        fs::remove(final_path, ec);
+        if (ec) {
+            std::cerr << "Failed to remove existing destination file: " << final_path
+                      << " (" << ec.message() << ")\n";
+            return false;
+        }
+    }
+
+    fs::rename(part_path, final_path, ec);
+    if (ec) {
+        std::cerr << "Failed to finalize received file: " << final_path
+                  << " (" << ec.message() << ")\n";
+        return false;
+    }
+
+    return true;
+}
+
+} // namespace
+
 void MessageSender::send(boost::asio::ip::tcp::socket& socket, const std::string& message) {
     try {
         std::string msg = message + "\n";
@@ -53,6 +81,13 @@ std::string MessageReceiver::receive(boost::asio::ip::tcp::socket& socket) {
         std::string message;
         std::getline(is, message);
         return message;
+    } catch (const boost::system::system_error& e) {
+        if (e.code() == boost::asio::error::eof ||
+            e.code() == boost::asio::error::operation_aborted) {
+            return "";
+        }
+        std::cerr << "MessageReceiver Exception: " << e.what() << "\n";
+        return "";
     } catch (std::exception& e) {
         std::cerr << "MessageReceiver Exception: " << e.what() << "\n";
         return "";
@@ -65,6 +100,13 @@ protocol::PacketHeader MessageReceiver::receive_header(boost::asio::ip::tcp::soc
         std::array<uint8_t, 16> buf;
         boost::asio::read(socket, boost::asio::buffer(buf));
         return protocol::deserialize_header(buf);
+    } catch (const boost::system::system_error& e) {
+        if (e.code() == boost::asio::error::eof ||
+            e.code() == boost::asio::error::operation_aborted) {
+            return empty_header;
+        }
+        std::cerr << "MessageReceiver Exception: " << e.what() << "\n";
+        return empty_header;
     } catch (std::exception& e) {
         std::cerr << "MessageReceiver Exception: " << e.what() << "\n";
         return empty_header;
@@ -130,7 +172,7 @@ bool MessageSender::send_file(boost::asio::ip::tcp::socket& socket, const std::s
                     double elapsed = std::chrono::duration<double>(now - start_time).count();
                     uint64_t session_sent = total_sent - start_offset;
                     double speed = (elapsed > 0) ? (session_sent / elapsed / (1024.0 * 1024.0)) : 0;
-                    std::filesystem::path p(filepath);
+                    fs::path p(filepath);
                     progress_cb(p.filename().string(), total_sent, file_size, speed);
                     last_cb_time = now;
                 }
@@ -145,11 +187,12 @@ bool MessageSender::send_file(boost::asio::ip::tcp::socket& socket, const std::s
 
 TransferState MessageReceiver::receive_file(boost::asio::ip::tcp::socket& socket, const std::string& filepath, uint64_t expected_size, uint64_t start_offset, TransferProgressCallback progress_cb, std::atomic<bool>* cancel_flag) {
     try {
-        std::string part_file = filepath + ".fluxpart";
+        fs::path final_path(filepath);
+        fs::path part_path(filepath + ".fluxpart");
         
-        std::filesystem::path parent = std::filesystem::path(part_file).parent_path();
+        fs::path parent = part_path.parent_path();
         if (!parent.empty()) {
-            std::filesystem::create_directories(parent);
+            fs::create_directories(parent);
         }
         
         std::ios_base::openmode mode = std::ios::binary;
@@ -157,9 +200,9 @@ TransferState MessageReceiver::receive_file(boost::asio::ip::tcp::socket& socket
             mode |= std::ios::app;
         }
         
-        std::ofstream file(part_file, mode);
+        std::ofstream file(part_path, mode);
         if (!file.is_open()) {
-            std::cerr << "Could not open file for writing: " << part_file << "\n";
+            std::cerr << "Could not open file for writing: " << part_path << "\n";
             return TransferState::FAILED;
         }
 
@@ -213,7 +256,8 @@ TransferState MessageReceiver::receive_file(boost::asio::ip::tcp::socket& socket
             } else if (header.command == static_cast<uint32_t>(protocol::CommandType::CANCEL)) {
                 std::cout << "\nTransfer cancelled by sender.\n";
                 file.close();
-                std::remove(part_file.c_str());
+                std::error_code ec;
+                fs::remove(part_path, ec);
                 return TransferState::CANCELLED;
             } else if (header.command == static_cast<uint32_t>(protocol::CommandType::PING)) {
                 protocol::PacketHeader pong_header{static_cast<uint32_t>(protocol::CommandType::PONG), 0, header.session_id, 0};
@@ -226,9 +270,8 @@ TransferState MessageReceiver::receive_file(boost::asio::ip::tcp::socket& socket
         }
         file.close();
         
-        if (std::rename(part_file.c_str(), filepath.c_str()) != 0) {
-             std::cerr << "Failed to rename temp file to: " << filepath << "\n";
-             return TransferState::FAILED;
+        if (!replace_with_completed_file(part_path, final_path)) {
+            return TransferState::FAILED;
         }
 
         return TransferState::COMPLETED;
