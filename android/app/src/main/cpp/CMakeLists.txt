@@ -4,8 +4,8 @@ project(fluxdrop_android)
 set(CMAKE_CXX_STANDARD 20)
 
 # Core library source directory
-set(CORE_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../src")
-set(CORE_INC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../include")
+set(CORE_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../Engine/src")
+set(CORE_INC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../Engine/include")
 
 # --- Third-party dependencies ---
 

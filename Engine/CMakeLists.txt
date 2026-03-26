@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(FluxDrop)
+project(FluxDropEngine)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
@@ -38,16 +38,3 @@ target_link_libraries(fluxdrop_core PUBLIC
 if (WIN32)
     target_link_libraries(fluxdrop_core PUBLIC ws2_32 mswsock bcrypt)
 endif()
-
-# --- Main Executable (CLI) ---
-add_executable(fluxdrop
-    src/main.cpp
-)
-
-target_include_directories(fluxdrop PRIVATE
-    include
-)
-
-target_link_libraries(fluxdrop PRIVATE
-    fluxdrop_core
-)
