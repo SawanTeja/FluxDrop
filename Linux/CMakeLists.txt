@@ -21,12 +21,6 @@ add_executable(fluxdrop_gui
     src/ui/transfer_dialog.cpp
 )
 
-# Build without console if on Windows
-if (WIN32)
-    target_sources(fluxdrop_gui PRIVATE src/app.rc)
-    set_property(TARGET fluxdrop_gui PROPERTY WIN32_EXECUTABLE ON)
-endif()
-
 # Include core headers and local UI headers
 target_include_directories(fluxdrop_gui PRIVATE
     include
@@ -45,10 +39,6 @@ target_link_libraries(fluxdrop_gui PRIVATE
     ${Boost_LIBRARIES}
     ${SODIUM_LIBRARIES}
 )
-
-if (WIN32)
-    target_link_libraries(fluxdrop_gui PRIVATE ws2_32 mswsock bcrypt)
-endif()
 
 target_compile_options(fluxdrop_gui PRIVATE ${GTK4_CFLAGS_OTHER})
 
