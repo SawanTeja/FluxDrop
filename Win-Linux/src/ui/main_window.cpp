@@ -11,15 +11,10 @@ window {
     background-color: #1a1a2e;
 }
 
-headerbar {
-    background: linear-gradient(to right, #16213e, #0f3460);
-    color: #e0e0e0;
+.top-panel {
+    background-color: #202030;
     border-bottom: 1px solid #533483;
-}
-
-headerbar title {
-    color: #e0e0e0;
-    font-weight: bold;
+    padding: 8px;
 }
 
 stackswitcher button {
@@ -146,7 +141,13 @@ progressbar progress {
     min-height: 10px;
 }
 
-scrolledwindow {
+scrolledwindow.file-list-scroll {
+    background-color: #16213e;
+    border: 1px solid #533483;
+    border-radius: 8px;
+}
+
+list.file-list {
     background-color: transparent;
 }
 
@@ -171,6 +172,8 @@ entry:focus {
 )";
 
 void MainWindow::setup_css() {
+    g_object_set(gtk_settings_get_default(), "gtk-application-prefer-dark-theme", TRUE, NULL);
+    
     GtkCssProvider* provider = gtk_css_provider_new();
     gtk_css_provider_load_from_string(provider, CSS_STYLE);
     gtk_style_context_add_provider_for_display(
@@ -198,16 +201,16 @@ MainWindow::MainWindow(GtkApplication* app) {
     gtk_window_set_title(GTK_WINDOW(window_), "FluxDrop");
     gtk_window_set_default_size(GTK_WINDOW(window_), 520, 650);
 
-    header_bar_ = gtk_header_bar_new();
-    gtk_window_set_titlebar(GTK_WINDOW(window_), header_bar_);
+    GtkWidget* main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_window_set_child(GTK_WINDOW(window_), main_box);
 
-    GtkWidget* logo_image = gtk_image_new_from_file("assets/fluxdroplogo.png");
-    gtk_widget_set_size_request(logo_image, 32, 32);
-    gtk_header_bar_pack_start(GTK_HEADER_BAR(header_bar_), logo_image);
+    GtkWidget* top_panel = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    gtk_widget_add_css_class(top_panel, "top-panel");
+    gtk_box_append(GTK_BOX(main_box), top_panel);
 
-    GtkWidget* title_label = gtk_label_new("FluxDrop");
-    gtk_widget_add_css_class(title_label, "title-text");
-    gtk_header_bar_set_title_widget(GTK_HEADER_BAR(header_bar_), title_label);
+    GtkIconTheme* theme = gtk_icon_theme_get_for_display(gdk_display_get_default());
+    gtk_icon_theme_add_search_path(theme, "assets");
+    gtk_window_set_default_icon_name("fluxdroplogo");
 
     stack_ = gtk_stack_new();
     gtk_stack_set_transition_type(GTK_STACK(stack_), GTK_STACK_TRANSITION_TYPE_SLIDE_LEFT_RIGHT);
@@ -221,9 +224,14 @@ MainWindow::MainWindow(GtkApplication* app) {
 
     GtkWidget* switcher = gtk_stack_switcher_new();
     gtk_stack_switcher_set_stack(GTK_STACK_SWITCHER(switcher), GTK_STACK(stack_));
-    gtk_header_bar_set_title_widget(GTK_HEADER_BAR(header_bar_), switcher);
+    gtk_widget_set_hexpand(switcher, TRUE);
+    gtk_widget_set_halign(switcher, GTK_ALIGN_CENTER);
+    gtk_box_append(GTK_BOX(top_panel), switcher);
 
-    gtk_window_set_child(GTK_WINDOW(window_), stack_);
+
+
+    gtk_widget_set_vexpand(stack_, TRUE);
+    gtk_box_append(GTK_BOX(main_box), stack_);
 
     g_signal_connect(window_, "destroy", G_CALLBACK(on_destroy), this);
 

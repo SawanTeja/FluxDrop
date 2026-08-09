@@ -423,9 +423,11 @@ G_GNUC_END_IGNORE_DEPRECATIONS
     gtk_widget_set_vexpand(scroll, TRUE);
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
                                    GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_widget_add_css_class(scroll, "file-list-scroll");
 
     list_box_ = gtk_list_box_new();
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(list_box_), GTK_SELECTION_SINGLE);
+    gtk_widget_add_css_class(list_box_, "file-list");
     g_signal_connect(list_box_, "row-activated", G_CALLBACK(row_activated_cb), this);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), list_box_);
     gtk_box_append(GTK_BOX(panel_), scroll);
