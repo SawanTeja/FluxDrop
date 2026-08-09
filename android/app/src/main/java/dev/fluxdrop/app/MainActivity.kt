@@ -105,14 +105,7 @@ fun FluxDropApp() {
                     .padding(vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    painter = androidx.compose.ui.res.painterResource(id = R.drawable.fluxdroplogo),
-                    contentDescription = "App Logo",
-                    modifier = Modifier
-                        .padding(horizontal = 16.dp)
-                        .size(32.dp),
-                    tint = Color.White
-                )
+
 
                 TabRow(
                     selectedTabIndex = pagerState.currentPage,
@@ -150,7 +143,7 @@ fun FluxDropApp() {
                         Text("Receive", color = Color.White)
                     }
                 }
-                Spacer(modifier = Modifier.size(48.dp))
+
             }
             Divider(color = FluxPrimary, thickness = 1.dp)
             
