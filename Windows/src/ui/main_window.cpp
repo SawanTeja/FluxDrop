@@ -19,6 +19,10 @@ QTabWidget::pane {
     background-color: #1a1a2e;
 }
 
+QTabWidget::tab-bar {
+    alignment: center;
+}
+
 QTabBar {
     background-color: #202030;
     qproperty-drawBase: 0;

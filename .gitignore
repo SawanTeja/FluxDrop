@@ -53,3 +53,19 @@ BUILD_AND_RUN_GUIDE.md
 report.md
 # Documentation
 play_store_publishing_guide.md
+
+# Windows build output
+dist/
+Windows/dist/
+*.exe
+*.dll
+
+# IDEs and OS files
+.vscode/
+.vs/
+.idea/
+*.suo
+*.user
+*.db
+.DS_Store
+Thumbs.db
