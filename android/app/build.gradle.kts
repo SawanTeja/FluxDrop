@@ -3,6 +3,9 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+apply(from = "build_libsodium.gradle.kts")
+
+
 android {
     namespace = "dev.fluxdrop.app"
     compileSdk = 34

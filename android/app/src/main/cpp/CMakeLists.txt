@@ -15,16 +15,11 @@ set(BOOST_INCLUDE_DIR "")
 
 if (EXISTS "${BOOST_ROOT}/boost/asio.hpp")
     set(BOOST_INCLUDE_DIR "${BOOST_ROOT}")
-elseif (EXISTS "C:/msys64/mingw64/include/boost/asio.hpp")
-    set(BOOST_INCLUDE_DIR "C:/msys64/mingw64/include")
 else()
     find_path(BOOST_INCLUDE_DIR
         NAMES boost/asio.hpp
         PATHS
             "$ENV{BOOST_ROOT}"
-            "$ENV{MINGW_PREFIX}/include"
-            "/usr/local/include"
-            "/usr/include"
         NO_CMAKE_FIND_ROOT_PATH
     )
 endif()
@@ -44,6 +39,13 @@ include_directories(${JSON_DIR})
 
 # libsodium (pre-built for Android)
 set(SODIUM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libsodium")
+if (NOT EXISTS "${SODIUM_DIR}/lib/${ANDROID_ABI}/libsodium.a")
+    message(FATAL_ERROR
+        "libsodium.a not found in ${SODIUM_DIR}/lib/${ANDROID_ABI}/. "
+        "The gradle task 'buildLibsodium' should have built this. "
+        "Run './gradlew buildLibsodium' manually or check its logs."
+    )
+endif()
 include_directories(${SODIUM_DIR}/include)
 add_library(sodium STATIC IMPORTED)
 set_target_properties(sodium PROPERTIES
