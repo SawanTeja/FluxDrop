@@ -1,0 +1,4 @@
+CompileFlags:
+  CompilationDatabase: build
+  Compiler: clang++
+  Add: [-isystem, "C:/msys64/ucrt64/include/c++/16.2.0", -isystem, "C:/msys64/ucrt64/include/c++/16.2.0/x86_64-w64-mingw32", -isystem, "C:/msys64/ucrt64/include"]
