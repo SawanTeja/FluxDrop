@@ -21,47 +21,51 @@ A fast, secure, cross-platform peer-to-peer file transfer tool for local network
 
 ```
 FluxDrop/
-├── include/                  # Shared C++ headers (all platforms)
-│   ├── fluxdrop_core.h       # C API for the transfer engine
-│   ├── networking.hpp        # Server, Client, DiscoveryListener classes
-│   ├── transfer.hpp          # File send/receive with progress
-│   ├── security.hpp          # PIN generation & BLAKE2b hashing
-│   └── protocol/             # Packet header & file metadata formats
-│       ├── packet.hpp
-│       └── file_meta.hpp
+├── Engine/                   # Shared C++ core engine (all platforms)
+│   ├── include/              # Core API and headers
+│   │   ├── fluxdrop_core.h   # C API for the transfer engine
+│   │   ├── logger.hpp        # Cross-platform logging utility
+│   │   ├── networking.hpp    # Server, Client, DiscoveryListener classes
+│   │   ├── transfer.hpp      # File send/receive with progress
+│   │   ├── security.hpp      # PIN generation & BLAKE2b hashing
+│   │   └── protocol/         # Packet header & file metadata formats
+│   └── src/                  # Engine implementation
+│       ├── core_api.cpp      # C API implementation
+│       ├── networking.cpp    # TCP server/client + UDP discovery
+│       ├── transfer.cpp      # Chunked file I/O + progress callbacks
+│       ├── security.cpp      # libsodium PIN hashing
+│       └── packet.cpp        # Binary protocol serialization
 │
-├── src/                      # Shared C++ source (all platforms)
-│   ├── core_api.cpp          # C API implementation (fd_* functions)
-│   ├── networking.cpp        # TCP server/client + UDP discovery
-│   ├── transfer.cpp          # Chunked file I/O + progress callbacks
-│   ├── security.cpp          # libsodium PIN hashing
-│   ├── packet.cpp            # Binary protocol serialization
-│   └── main.cpp              # CLI entry point (Linux/Windows)
-│
-├── Win-Linux/                # Windows/Linux GTK4 desktop app
-│   ├── CMakeLists.txt
+├── Windows/                  # Qt6 Windows GUI desktop app
 │   ├── include/ui/           # GUI panel headers
-│   └── src/ui/               # GTK4 implementation
-│       ├── main_window.cpp   # App shell, CSS, stack switcher
-│       ├── file_sender.cpp   # Send panel (file picker → server)
-│       ├── device_list.cpp   # Receive panel (discovery + connect)
+│   ├── src/ui/               # Qt6 UI implementation
+│   │   ├── main_window.cpp
+│   │   ├── file_sender.cpp
+│   │   ├── device_list.cpp
+│   │   └── transfer_dialog.cpp
+│   ├── deploy.sh             # MSYS2 deployment script
+│   └── make_standalone.ps1   # Standalone executable packager
+│
+├── Linux/                    # GTK4 Linux GUI desktop app
+│   ├── include/ui/           # GUI panel headers
+│   └── src/ui/               # GTK4 UI implementation
+│       ├── main_window.cpp
+│       ├── file_sender.cpp
+│       ├── device_list.cpp
 │       └── transfer_dialog.cpp
 │
 ├── android/                  # Android app (Jetpack Compose + JNI)
 │   └── app/src/main/
 │       ├── cpp/
 │       │   ├── jni_bridge.cpp        # JNI ↔ C API bridge
-│       │   └── third_party/          # Android native deps (nlohmann, boost, libsodium)
+│       │   └── third_party/          # Android native deps
 │       └── java/dev/fluxdrop/app/
 │           ├── bridge/FluxDropCore.kt  # Kotlin ↔ JNI interface
-│           ├── ui/screens/
-│           │   ├── SendScreen.kt       # Share files screen
-│           │   └── ReceiveScreen.kt    # Receive files screen
-│           └── ui/components/
-│               └── TransferProgress.kt # Gradient progress bar
+│           └── ui/                     # Jetpack Compose UI
 │
-├── CMakeLists.txt            # Root CMake (CLI build)
+├── CMakeLists.txt            # Root CMake
 ├── TESTING.md                # Full test suite documentation
+├── BUILD_AND_RUN_GUIDE.md    # Build instructions
 └── README.md                 # Project documentation
 ```
 
