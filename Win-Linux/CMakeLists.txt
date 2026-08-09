@@ -23,6 +23,7 @@ add_executable(fluxdrop_gui
 
 # Build without console if on Windows
 if (WIN32)
+    target_sources(fluxdrop_gui PRIVATE src/app.rc)
     set_property(TARGET fluxdrop_gui PROPERTY WIN32_EXECUTABLE ON)
 endif()
 
