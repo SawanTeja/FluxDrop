@@ -25,6 +25,7 @@ add_executable(fluxdrop_gui
 target_include_directories(fluxdrop_gui PRIVATE
     include
     ../Engine/include
+    ../Logger/include
     ${GTK4_INCLUDE_DIRS}
     ${Boost_INCLUDE_DIRS}
     ${SODIUM_INCLUDE_DIRS}
@@ -33,6 +34,7 @@ target_include_directories(fluxdrop_gui PRIVATE
 # Link against the pre-built core library and its transitive dependencies
 target_link_libraries(fluxdrop_gui PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../Engine/build/libfluxdrop_core.a
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Engine/build/logger/libfluxdrop_logger.a
     ${GTK4_LIBRARIES}
     Threads::Threads
     nlohmann_json::nlohmann_json

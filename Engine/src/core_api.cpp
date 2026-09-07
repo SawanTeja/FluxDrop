@@ -12,7 +12,7 @@
 
 namespace fs = std::filesystem;
 
-#define CORE_LOG(msg) std::cerr << "[FD-CORE] " << msg << std::endl
+#include "logger.hpp"
 
 namespace {
 

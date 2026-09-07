@@ -54,6 +54,7 @@ set_target_properties(sodium PROPERTIES
 
 # --- Core library ---
 add_library(fluxdrop_core STATIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../Logger/src/logger.cpp
     ${CORE_SRC_DIR}/networking.cpp
     ${CORE_SRC_DIR}/transfer.cpp
     ${CORE_SRC_DIR}/packet.cpp
@@ -61,7 +62,10 @@ add_library(fluxdrop_core STATIC
     ${CORE_SRC_DIR}/core_api.cpp
 )
 
-target_include_directories(fluxdrop_core PUBLIC ${CORE_INC_DIR})
+target_include_directories(fluxdrop_core PUBLIC 
+    ${CORE_INC_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../Logger/include
+)
 
 # --- JNI bridge ---
 add_library(fluxdrop_jni SHARED jni_bridge.cpp)

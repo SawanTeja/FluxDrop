@@ -38,6 +38,7 @@ set_property(TARGET fluxdrop_gui PROPERTY WIN32_EXECUTABLE ON)
 target_include_directories(fluxdrop_gui PRIVATE
     include
     ../Engine/include
+    ../Logger/include
     ${Boost_INCLUDE_DIRS}
     ${SODIUM_INCLUDE_DIRS}
 )
@@ -45,6 +46,7 @@ target_include_directories(fluxdrop_gui PRIVATE
 # Link against the pre-built core library and its transitive dependencies
 target_link_libraries(fluxdrop_gui PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../Engine/build/libfluxdrop_core.a
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Engine/build/logger/libfluxdrop_logger.a
     Qt6::Widgets
     Threads::Threads
     nlohmann_json::nlohmann_json

@@ -13,6 +13,8 @@ find_package(PkgConfig REQUIRED)
 find_package(nlohmann_json REQUIRED)
 pkg_check_modules(SODIUM REQUIRED libsodium)
 
+add_subdirectory(../Logger logger)
+
 # --- Core Library ---
 add_library(fluxdrop_core STATIC
     src/networking.cpp
@@ -29,6 +31,7 @@ target_include_directories(fluxdrop_core PUBLIC
 )
 
 target_link_libraries(fluxdrop_core PUBLIC
+    fluxdrop_logger
     Threads::Threads
     nlohmann_json::nlohmann_json
     ${Boost_LIBRARIES}
