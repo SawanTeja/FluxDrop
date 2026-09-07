@@ -10,14 +10,14 @@ namespace ui {
 
 class TransferDialog : public QDialog {
     Q_OBJECT
-public:
+  public:
     TransferDialog(QWidget* parent, const std::string& title);
 
     void set_filename(const std::string& filename);
     void set_progress(double fraction, const std::string& text);
     void set_status(const std::string& status);
 
-private:
+  private:
     QLabel* filename_label_;
     QProgressBar* progress_bar_;
     QLabel* progress_label_;

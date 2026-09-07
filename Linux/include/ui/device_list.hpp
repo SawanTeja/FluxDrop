@@ -1,19 +1,20 @@
 #pragma once
 
-#include <gtk/gtk.h>
-#include "networking.hpp"
 #include "fluxdrop_core.h"
+#include "networking.hpp"
+#include <future>
+#include <gtk/gtk.h>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <string>
-#include <memory>
-#include <future>
 
 namespace ui {
 
 class DeviceListPanel {
     friend void on_connect_btn_clicked(GtkButton* btn, gpointer data);
-public:
+
+  public:
     explicit DeviceListPanel(GtkWindow* parent_window);
     ~DeviceListPanel();
 
@@ -21,7 +22,7 @@ public:
     void start_discovery();
     void stop_discovery();
 
-private:
+  private:
     GtkWidget* panel_;
     GtkWidget* list_box_;
     GtkWidget* status_label_;

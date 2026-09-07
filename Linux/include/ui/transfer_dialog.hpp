@@ -6,7 +6,7 @@
 namespace ui {
 
 class TransferDialog {
-public:
+  public:
     TransferDialog(GtkWindow* parent, const std::string& title);
 
     void set_filename(const std::string& filename);
@@ -17,7 +17,7 @@ public:
 
     GtkWidget* get_widget() const { return dialog_; }
 
-private:
+  private:
     GtkWidget* dialog_;
     GtkWidget* filename_label_;
     GtkWidget* progress_bar_;

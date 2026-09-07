@@ -1,0 +1,4 @@
+Checks: '-*,bugprone-*,performance-*,modernize-*,readability-*,-readability-magic-numbers,-readability-implicit-bool-conversion,-modernize-use-trailing-return-type'
+WarningsAsErrors: 'bugprone-*'
+HeaderFilterRegex: '.*'
+FormatStyle: 'file'

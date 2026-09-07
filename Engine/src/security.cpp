@@ -1,9 +1,9 @@
 #include "security.hpp"
-#include <sodium.h>
-#include <random>
-#include <sstream>
 #include <iomanip>
 #include <iostream>
+#include <random>
+#include <sodium.h>
+#include <sstream>
 
 namespace security {
 
@@ -25,9 +25,7 @@ std::string hash_pin(const std::string& pin) {
     }
 
     unsigned char hash[crypto_generichash_BYTES]; // 32 bytes
-    crypto_generichash(hash, sizeof(hash),
-                       reinterpret_cast<const unsigned char*>(pin.c_str()), pin.size(),
-                       nullptr, 0);
+    crypto_generichash(hash, sizeof(hash), reinterpret_cast<const unsigned char*>(pin.c_str()), pin.size(), nullptr, 0);
 
     std::ostringstream oss;
     for (size_t i = 0; i < sizeof(hash); ++i) {

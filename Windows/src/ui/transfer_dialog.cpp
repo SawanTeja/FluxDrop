@@ -2,8 +2,7 @@
 
 namespace ui {
 
-TransferDialog::TransferDialog(QWidget* parent, const std::string& title)
-    : QDialog(parent) {
+TransferDialog::TransferDialog(QWidget* parent, const std::string& title) : QDialog(parent) {
 
     setWindowTitle(QString::fromStdString(title));
     resize(400, 200);

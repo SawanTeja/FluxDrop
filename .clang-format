@@ -1,0 +1,11 @@
+Language: Cpp
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 120
+Standard: c++20
+PointerAlignment: Left
+AllowShortFunctionsOnASingleLine: Inline
+BreakBeforeBraces: Attach
+SpaceBeforeParens: ControlStatements
+TabWidth: 4
+UseTab: Never

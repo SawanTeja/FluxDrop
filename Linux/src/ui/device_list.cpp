@@ -1,6 +1,6 @@
 #include "ui/device_list.hpp"
-#include "ui/transfer_dialog.hpp"
 #include "logger.hpp"
+#include "ui/transfer_dialog.hpp"
 #include <iostream>
 #include <thread>
 
@@ -156,34 +156,37 @@ static gboolean file_request_idle(gpointer data) {
     auto* rd = new RespData{dialog, d->promise, false};
 
     g_signal_connect(accept_btn, "clicked", G_CALLBACK(+[](GtkButton*, gpointer user) {
-        auto* rnd = static_cast<RespData*>(user);
-        if (!rnd->answered) {
-            FD_LOG("File request: ACCEPTED");
-            rnd->prom->set_value(true);
-            rnd->answered = true;
-        }
-        gtk_window_close(GTK_WINDOW(rnd->win));
-    }), rd);
+                         auto* rnd = static_cast<RespData*>(user);
+                         if (!rnd->answered) {
+                             FD_LOG("File request: ACCEPTED");
+                             rnd->prom->set_value(true);
+                             rnd->answered = true;
+                         }
+                         gtk_window_close(GTK_WINDOW(rnd->win));
+                     }),
+                     rd);
 
     g_signal_connect(reject_btn, "clicked", G_CALLBACK(+[](GtkButton*, gpointer user) {
-        auto* rnd = static_cast<RespData*>(user);
-        if (!rnd->answered) {
-            FD_LOG("File request: REJECTED");
-            rnd->prom->set_value(false);
-            rnd->answered = true;
-        }
-        gtk_window_close(GTK_WINDOW(rnd->win));
-    }), rd);
+                         auto* rnd = static_cast<RespData*>(user);
+                         if (!rnd->answered) {
+                             FD_LOG("File request: REJECTED");
+                             rnd->prom->set_value(false);
+                             rnd->answered = true;
+                         }
+                         gtk_window_close(GTK_WINDOW(rnd->win));
+                     }),
+                     rd);
 
     g_signal_connect(dialog, "destroy", G_CALLBACK(+[](GtkWidget*, gpointer user) {
-        auto* rnd = static_cast<RespData*>(user);
-        if (!rnd->answered) {
-            FD_WARN("File request dialog destroyed without answer — rejecting");
-            rnd->prom->set_value(false);
-            rnd->answered = true;
-        }
-        delete rnd;
-    }), rd);
+                         auto* rnd = static_cast<RespData*>(user);
+                         if (!rnd->answered) {
+                             FD_WARN("File request dialog destroyed without answer — rejecting");
+                             rnd->prom->set_value(false);
+                             rnd->answered = true;
+                         }
+                         delete rnd;
+                     }),
+                     rd);
 
     gtk_window_present(GTK_WINDOW(dialog));
     delete d;
@@ -192,7 +195,10 @@ static gboolean file_request_idle(gpointer data) {
 
 static gboolean add_device_row_idle(gpointer d) {
     auto* data = static_cast<AddRowData*>(d);
-    if (!GTK_IS_LIST_BOX(data->list_box)) { delete data; return G_SOURCE_REMOVE; }
+    if (!GTK_IS_LIST_BOX(data->list_box)) {
+        delete data;
+        return G_SOURCE_REMOVE;
+    }
 
     FD_LOG("Adding device row: " << data->device.ip << ":" << data->device.port);
 
@@ -278,13 +284,13 @@ void on_connect_btn_clicked(GtkButton* /*btn*/, gpointer data) {
         auto bracket = msg.find('[');
         if (bracket != std::string::npos && bracket > 0) {
             msg = msg.substr(0, bracket);
-            while (!msg.empty() && (msg.back() == ' ' || msg.back() == ':')) msg.pop_back();
+            while (!msg.empty() && (msg.back() == ' ' || msg.back() == ':'))
+                msg.pop_back();
         }
-        g_idle_add(recv_complete_idle, new RecvReenableData{
-            g_client_panel->cancel_button_, g_client_panel->progress_bar_,
-            g_client_panel->status_label_, g_client_panel->progress_label_,
-            "Error: " + msg, gen
-        });
+        g_idle_add(recv_complete_idle,
+                   new RecvReenableData{g_client_panel->cancel_button_, g_client_panel->progress_bar_,
+                                        g_client_panel->status_label_, g_client_panel->progress_label_, "Error: " + msg,
+                                        gen});
         g_client_panel->clear_and_restart_discovery();
     };
 
@@ -292,9 +298,7 @@ void on_connect_btn_clicked(GtkButton* /*btn*/, gpointer data) {
         FD_LOG("File request: " << filename << " (" << size << " bytes)");
         std::promise<bool> prom;
         auto fut = prom.get_future();
-        g_idle_add(file_request_idle, new FileRequestData{
-            g_client_panel->parent_window_, filename, size, &prom
-        });
+        g_idle_add(file_request_idle, new FileRequestData{g_client_panel->parent_window_, filename, size, &prom});
         while (fut.wait_for(std::chrono::milliseconds(200)) != std::future_status::ready) {
             if (!g_client_panel->transferring_) {
                 FD_WARN("File request interrupted by cancel — rejecting");
@@ -310,20 +314,19 @@ void on_connect_btn_clicked(GtkButton* /*btn*/, gpointer data) {
         char buf[128];
         snprintf(buf, sizeof(buf), "%d%% — %.1f MB/s — %s", pct, speed, filename);
         uint64_t gen = g_recv_gen.load();
-        g_idle_add(update_recv_progress_idle, new RecvProgressData{
-            g_client_panel->progress_bar_, g_client_panel->progress_label_, frac, std::string(buf), gen
-        });
+        g_idle_add(update_recv_progress_idle,
+                   new RecvProgressData{g_client_panel->progress_bar_, g_client_panel->progress_label_, frac,
+                                        std::string(buf), gen});
     };
 
     auto complete_cb = []() {
         FD_LOG("Client transfer complete");
         uint64_t gen = g_recv_gen.load();
         g_client_panel->transferring_ = false;
-        g_idle_add(recv_complete_idle, new RecvReenableData{
-            g_client_panel->cancel_button_, g_client_panel->progress_bar_,
-            g_client_panel->status_label_, g_client_panel->progress_label_,
-            "✅ All files received!", gen
-        });
+        g_idle_add(recv_complete_idle,
+                   new RecvReenableData{g_client_panel->cancel_button_, g_client_panel->progress_bar_,
+                                        g_client_panel->status_label_, g_client_panel->progress_label_,
+                                        "✅ All files received!", gen});
         g_client_panel->clear_and_restart_discovery();
     };
 
@@ -331,16 +334,15 @@ void on_connect_btn_clicked(GtkButton* /*btn*/, gpointer data) {
     auto pin_copy = pin;
     auto save_dir_copy = cd->save_dir;
 
-    fd_connect(dev.ip.c_str(), dev.port, pin_copy.c_str(), save_dir_copy.c_str(),
-               status_cb, error_cb, file_request_cb, progress_cb, complete_cb);
+    fd_connect(dev.ip.c_str(), dev.port, pin_copy.c_str(), save_dir_copy.c_str(), status_cb, error_cb, file_request_cb,
+               progress_cb, complete_cb);
 
     delete cd;
 }
 
 // DeviceListPanel
 
-DeviceListPanel::DeviceListPanel(GtkWindow* parent_window)
-    : parent_window_(parent_window) {
+DeviceListPanel::DeviceListPanel(GtkWindow* parent_window) : parent_window_(parent_window) {
 
     FD_LOG("DeviceListPanel created");
 
@@ -388,31 +390,34 @@ DeviceListPanel::DeviceListPanel(GtkWindow* parent_window)
     GtkWidget* change_btn = gtk_button_new_with_label("Change");
     gtk_widget_add_css_class(change_btn, "flat");
     g_signal_connect(change_btn, "clicked", G_CALLBACK(+[](GtkButton* /*btn*/, gpointer data) {
-        auto* self = static_cast<DeviceListPanel*>(data);
-G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-        GtkFileChooserNative* native = gtk_file_chooser_native_new(
-            "Select Save Folder", self->parent_window_,
-            GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER, "_Select", "_Cancel");
-        g_signal_connect(native, "response", G_CALLBACK(+[](GtkNativeDialog* dialog, int response, gpointer d) {
-            if (response == GTK_RESPONSE_ACCEPT) {
-                auto* panel = static_cast<DeviceListPanel*>(d);
-                GFile* folder = gtk_file_chooser_get_file(GTK_FILE_CHOOSER(dialog));
-                if (folder) {
-                    char* path = g_file_get_path(folder);
-                    if (path) {
-                        panel->save_dir_ = path;
-                        gtk_label_set_text(GTK_LABEL(panel->save_label_), path);
-                        FD_LOG("Save directory changed to: " << path);
-                        g_free(path);
-                    }
-                    g_object_unref(folder);
-                }
-            }
-            g_object_unref(dialog);
-        }), self);
-        gtk_native_dialog_show(GTK_NATIVE_DIALOG(native));
-G_GNUC_END_IGNORE_DEPRECATIONS
-    }), this);
+                         auto* self = static_cast<DeviceListPanel*>(data);
+                         G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+                         GtkFileChooserNative* native =
+                             gtk_file_chooser_native_new("Select Save Folder", self->parent_window_,
+                                                         GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER, "_Select", "_Cancel");
+                         g_signal_connect(native, "response",
+                                          G_CALLBACK(+[](GtkNativeDialog* dialog, int response, gpointer d) {
+                                              if (response == GTK_RESPONSE_ACCEPT) {
+                                                  auto* panel = static_cast<DeviceListPanel*>(d);
+                                                  GFile* folder = gtk_file_chooser_get_file(GTK_FILE_CHOOSER(dialog));
+                                                  if (folder) {
+                                                      char* path = g_file_get_path(folder);
+                                                      if (path) {
+                                                          panel->save_dir_ = path;
+                                                          gtk_label_set_text(GTK_LABEL(panel->save_label_), path);
+                                                          FD_LOG("Save directory changed to: " << path);
+                                                          g_free(path);
+                                                      }
+                                                      g_object_unref(folder);
+                                                  }
+                                              }
+                                              g_object_unref(dialog);
+                                          }),
+                                          self);
+                         gtk_native_dialog_show(GTK_NATIVE_DIALOG(native));
+                         G_GNUC_END_IGNORE_DEPRECATIONS
+                     }),
+                     this);
     gtk_box_append(GTK_BOX(save_row), change_btn);
 
     gtk_box_append(GTK_BOX(panel_), save_row);
@@ -421,8 +426,7 @@ G_GNUC_END_IGNORE_DEPRECATIONS
     GtkWidget* scroll = gtk_scrolled_window_new();
     gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scroll), 200);
     gtk_widget_set_vexpand(scroll, TRUE);
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
-                                   GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
     gtk_widget_add_css_class(scroll, "file-list-scroll");
 
     list_box_ = gtk_list_box_new();
@@ -457,7 +461,8 @@ G_GNUC_END_IGNORE_DEPRECATIONS
         std::string ip = gtk_entry_buffer_get_text(ip_buf);
         std::string port_str = gtk_entry_buffer_get_text(port_buf);
 
-        if (ip.empty() || port_str.empty()) return;
+        if (ip.empty() || port_str.empty())
+            return;
 
         networking::DiscoveredDevice device;
         device.ip = ip;
@@ -471,7 +476,8 @@ G_GNUC_END_IGNORE_DEPRECATIONS
 
     static auto on_manual_btn_clicked = +[](GtkButton*, gpointer data) {
         auto* self = static_cast<DeviceListPanel*>(data);
-        if (self->transferring_) return;
+        if (self->transferring_)
+            return;
 
         GtkWidget* dialog = gtk_window_new();
         gtk_window_set_title(GTK_WINDOW(dialog), "Connect by IP");
@@ -539,19 +545,20 @@ G_GNUC_END_IGNORE_DEPRECATIONS
     gtk_widget_add_css_class(cancel_button_, "destructive-action");
     gtk_widget_set_visible(cancel_button_, FALSE);
     g_signal_connect(cancel_button_, "clicked", G_CALLBACK(+[](GtkButton* /*btn*/, gpointer data) -> void {
-        auto* self = static_cast<DeviceListPanel*>(data);
-        FD_LOG("Cancel transfer button clicked — non-blocking cancel");
+                         auto* self = static_cast<DeviceListPanel*>(data);
+                         FD_LOG("Cancel transfer button clicked — non-blocking cancel");
 
-        g_recv_gen++;
-        self->transferring_ = false;
+                         g_recv_gen++;
+                         self->transferring_ = false;
 
-        fd_request_cancel_client();
+                         fd_request_cancel_client();
 
-        gtk_widget_set_visible(self->cancel_button_, FALSE);
-        gtk_widget_set_visible(self->progress_bar_, FALSE);
-        gtk_label_set_text(GTK_LABEL(self->status_label_), "Transfer cancelled.");
-        gtk_label_set_text(GTK_LABEL(self->progress_label_), "");
-    }), this);
+                         gtk_widget_set_visible(self->cancel_button_, FALSE);
+                         gtk_widget_set_visible(self->progress_bar_, FALSE);
+                         gtk_label_set_text(GTK_LABEL(self->status_label_), "Transfer cancelled.");
+                         gtk_label_set_text(GTK_LABEL(self->progress_label_), "");
+                     }),
+                     this);
     gtk_box_append(GTK_BOX(section), cancel_button_);
 
     gtk_box_append(GTK_BOX(panel_), section);
@@ -559,7 +566,7 @@ G_GNUC_END_IGNORE_DEPRECATIONS
 
 DeviceListPanel::~DeviceListPanel() {
     FD_LOG("~DeviceListPanel — cleaning up");
-    g_recv_gen++;  // Invalidate pending idles
+    g_recv_gen++; // Invalidate pending idles
     stop_discovery();
     if (transferring_) {
         FD_LOG("~DeviceListPanel — cancelling active transfer (blocking)");
@@ -576,7 +583,8 @@ void DeviceListPanel::start_discovery() {
     static DeviceListPanel* g_panel;
     g_panel = this;
     fd_start_discovery(482913, [](const fd_device_t* dev) {
-        if (!dev) return;
+        if (!dev)
+            return;
         networking::DiscoveredDevice cpp_dev;
         cpp_dev.ip = dev->ip;
         cpp_dev.port = dev->port;
@@ -594,7 +602,8 @@ void DeviceListPanel::on_device_found(const networking::DiscoveredDevice& device
     std::string key = device.ip + ":" + std::to_string(device.port);
     {
         std::lock_guard<std::mutex> lock(devices_mutex_);
-        if (devices_.count(key)) return;
+        if (devices_.count(key))
+            return;
         devices_[key] = device;
     }
 
@@ -610,15 +619,18 @@ void DeviceListPanel::clear_and_restart_discovery() {
     }
     // Clear list box rows on the GTK main thread
     GtkWidget* lb = list_box_;
-    g_idle_add(+[](gpointer data) -> gboolean {
-        GtkWidget* list_box = static_cast<GtkWidget*>(data);
-        if (!GTK_IS_LIST_BOX(list_box)) return G_SOURCE_REMOVE;
-        GtkWidget* child;
-        while ((child = gtk_widget_get_first_child(list_box)) != nullptr) {
-            gtk_list_box_remove(GTK_LIST_BOX(list_box), child);
-        }
-        return G_SOURCE_REMOVE;
-    }, lb);
+    g_idle_add(
+        +[](gpointer data) -> gboolean {
+            GtkWidget* list_box = static_cast<GtkWidget*>(data);
+            if (!GTK_IS_LIST_BOX(list_box))
+                return G_SOURCE_REMOVE;
+            GtkWidget* child;
+            while ((child = gtk_widget_get_first_child(list_box)) != nullptr) {
+                gtk_list_box_remove(GTK_LIST_BOX(list_box), child);
+            }
+            return G_SOURCE_REMOVE;
+        },
+        lb);
     stop_discovery();
     start_discovery();
 }
@@ -631,11 +643,12 @@ void DeviceListPanel::row_activated_cb(GtkListBox* /*list_box*/, GtkListBoxRow* 
     }
 
     GtkWidget* child = gtk_list_box_row_get_child(row);
-    if (!child) return;
+    if (!child)
+        return;
 
-    auto* device = static_cast<networking::DiscoveredDevice*>(
-        g_object_get_data(G_OBJECT(child), "device"));
-    if (!device) return;
+    auto* device = static_cast<networking::DiscoveredDevice*>(g_object_get_data(G_OBJECT(child), "device"));
+    if (!device)
+        return;
 
     FD_LOG("Device selected: " << device->ip << ":" << device->port);
     self->connect_to_device(*device);

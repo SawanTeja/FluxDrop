@@ -8,13 +8,13 @@ class FileSenderPanel;
 class DeviceListPanel;
 
 class MainWindow {
-public:
+  public:
     explicit MainWindow(GtkApplication* app);
     ~MainWindow();
 
     GtkWidget* get_window() const { return window_; }
 
-private:
+  private:
     GtkWidget* window_;
     GtkWidget* stack_;
 

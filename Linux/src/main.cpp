@@ -1,7 +1,7 @@
-#include <gtk/gtk.h>
-#include "ui/main_window.hpp"
 #include "fluxdrop_core.h"
 #include "logger.hpp"
+#include "ui/main_window.hpp"
+#include <gtk/gtk.h>
 
 int main(int argc, char* argv[]) {
 

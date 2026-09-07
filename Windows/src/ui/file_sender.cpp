@@ -1,13 +1,13 @@
 #include "ui/file_sender.hpp"
-#include "ui/transfer_dialog.hpp"
-#include "logger.hpp"
 #include "fluxdrop_core.h"
-#include <QFileDialog>
+#include "logger.hpp"
+#include "ui/transfer_dialog.hpp"
 #include <QDragEnterEvent>
 #include <QDropEvent>
+#include <QFileDialog>
+#include <QHBoxLayout>
 #include <QMimeData>
 #include <QUrl>
-#include <QHBoxLayout>
 #include <algorithm>
 #include <filesystem>
 
@@ -30,8 +30,7 @@ static QPushButton* g_choose_file_btn = nullptr;
 static QPushButton* g_choose_folder_btn = nullptr;
 static std::atomic<bool>* g_running_ptr = nullptr;
 
-FileSenderPanel::FileSenderPanel(QWidget* parent)
-    : QWidget(parent) {
+FileSenderPanel::FileSenderPanel(QWidget* parent) : QWidget(parent) {
 
     FD_LOG("FileSenderPanel created");
 
@@ -182,7 +181,10 @@ void FileSenderPanel::update_file_list_ui() {
             double size = static_cast<double>(fsize);
             const char* units[] = {"B", "KB", "MB", "GB"};
             int i = 0;
-            while (size >= 1024 && i < 3) { size /= 1024; i++; }
+            while (size >= 1024 && i < 3) {
+                size /= 1024;
+                i++;
+            }
             char buf[64];
             snprintf(buf, sizeof(buf), " (%.1f %s)", size, units[i]);
             display += buf;
@@ -241,44 +243,62 @@ void FileSenderPanel::start_server() {
         FD_LOG("Server ready: " << ip << ":" << port << " PIN=" << pin);
         uint64_t gen = g_sender_gen.load();
         QString pin_text = "PIN: " + QString::number(pin);
-        QString status_text = "Listening on " + QString(ip) + ":" + QString::number(port) + " — Waiting for receiver...";
-        QMetaObject::invokeMethod(g_pin_lbl, [gen, pin_text]() {
-            if (gen != g_sender_gen.load()) return;
-            g_pin_lbl->setText(pin_text);
-        }, Qt::QueuedConnection);
-        QMetaObject::invokeMethod(g_status_lbl, [gen, status_text]() {
-            if (gen != g_sender_gen.load()) return;
-            g_status_lbl->setText(status_text);
-        }, Qt::QueuedConnection);
+        QString status_text =
+            "Listening on " + QString(ip) + ":" + QString::number(port) + " — Waiting for receiver...";
+        QMetaObject::invokeMethod(
+            g_pin_lbl,
+            [gen, pin_text]() {
+                if (gen != g_sender_gen.load())
+                    return;
+                g_pin_lbl->setText(pin_text);
+            },
+            Qt::QueuedConnection);
+        QMetaObject::invokeMethod(
+            g_status_lbl,
+            [gen, status_text]() {
+                if (gen != g_sender_gen.load())
+                    return;
+                g_status_lbl->setText(status_text);
+            },
+            Qt::QueuedConnection);
     };
 
     auto status_cb = [](const char* msg) {
         FD_LOG("Server status: " << msg);
         uint64_t gen = g_sender_gen.load();
         QString text = QString::fromUtf8(msg);
-        QMetaObject::invokeMethod(g_status_lbl, [gen, text]() {
-            if (gen != g_sender_gen.load()) return;
-            g_status_lbl->setText(text);
-        }, Qt::QueuedConnection);
+        QMetaObject::invokeMethod(
+            g_status_lbl,
+            [gen, text]() {
+                if (gen != g_sender_gen.load())
+                    return;
+                g_status_lbl->setText(text);
+            },
+            Qt::QueuedConnection);
     };
 
     auto error_cb = [](const char* err) {
         FD_ERR("Server error: " << err);
         uint64_t gen = g_sender_gen.load();
         QString msg = QString::fromUtf8("❌ Error: ") + QString::fromUtf8(err);
-        QMetaObject::invokeMethod(g_status_lbl, [gen, msg]() {
-            if (gen != g_sender_gen.load()) return;
-            g_status_lbl->setText(msg);
-            g_progress_br->setValue(1000);
-            g_progress_lbl->setText("Done");
-            g_send_btn->setVisible(true);
-            g_send_btn->setEnabled(true);
-            g_clear_btn_widget->setVisible(true);
-            g_cancel_btn->setVisible(false);
-            g_choose_file_btn->setEnabled(true);
-            g_choose_folder_btn->setEnabled(true);
-        }, Qt::QueuedConnection);
-        if (g_running_ptr) *g_running_ptr = false;
+        QMetaObject::invokeMethod(
+            g_status_lbl,
+            [gen, msg]() {
+                if (gen != g_sender_gen.load())
+                    return;
+                g_status_lbl->setText(msg);
+                g_progress_br->setValue(1000);
+                g_progress_lbl->setText("Done");
+                g_send_btn->setVisible(true);
+                g_send_btn->setEnabled(true);
+                g_clear_btn_widget->setVisible(true);
+                g_cancel_btn->setVisible(false);
+                g_choose_file_btn->setEnabled(true);
+                g_choose_folder_btn->setEnabled(true);
+            },
+            Qt::QueuedConnection);
+        if (g_running_ptr)
+            *g_running_ptr = false;
     };
 
     auto progress_cb = [](const char* filename, uint64_t transferred, uint64_t total, double speed) {
@@ -289,36 +309,48 @@ void FileSenderPanel::start_server() {
         uint64_t gen = g_sender_gen.load();
         int value = static_cast<int>(frac * 1000);
         QString text = QString::fromUtf8(buf);
-        QMetaObject::invokeMethod(g_progress_br, [gen, value]() {
-            if (gen != g_sender_gen.load()) return;
-            g_progress_br->setValue(value);
-        }, Qt::QueuedConnection);
-        QMetaObject::invokeMethod(g_progress_lbl, [gen, text]() {
-            if (gen != g_sender_gen.load()) return;
-            g_progress_lbl->setText(text);
-        }, Qt::QueuedConnection);
+        QMetaObject::invokeMethod(
+            g_progress_br,
+            [gen, value]() {
+                if (gen != g_sender_gen.load())
+                    return;
+                g_progress_br->setValue(value);
+            },
+            Qt::QueuedConnection);
+        QMetaObject::invokeMethod(
+            g_progress_lbl,
+            [gen, text]() {
+                if (gen != g_sender_gen.load())
+                    return;
+                g_progress_lbl->setText(text);
+            },
+            Qt::QueuedConnection);
     };
 
     auto complete_cb = []() {
         FD_LOG("Server transfer complete");
         uint64_t gen = g_sender_gen.load();
-        QMetaObject::invokeMethod(g_status_lbl, [gen]() {
-            if (gen != g_sender_gen.load()) return;
-            g_status_lbl->setText(QString::fromUtf8("✅ All files transferred successfully!"));
-            g_progress_br->setValue(1000);
-            g_progress_lbl->setText("Done");
-            g_send_btn->setVisible(true);
-            g_send_btn->setEnabled(true);
-            g_clear_btn_widget->setVisible(true);
-            g_cancel_btn->setVisible(false);
-            g_choose_file_btn->setEnabled(true);
-            g_choose_folder_btn->setEnabled(true);
-        }, Qt::QueuedConnection);
-        if (g_running_ptr) *g_running_ptr = false;
+        QMetaObject::invokeMethod(
+            g_status_lbl,
+            [gen]() {
+                if (gen != g_sender_gen.load())
+                    return;
+                g_status_lbl->setText(QString::fromUtf8("✅ All files transferred successfully!"));
+                g_progress_br->setValue(1000);
+                g_progress_lbl->setText("Done");
+                g_send_btn->setVisible(true);
+                g_send_btn->setEnabled(true);
+                g_clear_btn_widget->setVisible(true);
+                g_cancel_btn->setVisible(false);
+                g_choose_file_btn->setEnabled(true);
+                g_choose_folder_btn->setEnabled(true);
+            },
+            Qt::QueuedConnection);
+        if (g_running_ptr)
+            *g_running_ptr = false;
     };
 
-    fd_start_server(c_paths.data(), c_paths.size(),
-                    ready_cb, status_cb, error_cb, progress_cb, complete_cb);
+    fd_start_server(c_paths.data(), c_paths.size(), ready_cb, status_cb, error_cb, progress_cb, complete_cb);
 }
 
 void FileSenderPanel::cancel_server() {

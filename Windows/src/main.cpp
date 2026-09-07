@@ -1,7 +1,7 @@
-#include <QApplication>
-#include "ui/main_window.hpp"
 #include "fluxdrop_core.h"
 #include "logger.hpp"
+#include "ui/main_window.hpp"
+#include <QApplication>
 
 int main(int argc, char* argv[]) {
     FD_LOG("FluxDrop starting");

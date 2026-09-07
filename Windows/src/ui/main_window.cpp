@@ -1,7 +1,7 @@
 #include "ui/main_window.hpp"
-#include "ui/file_sender.hpp"
-#include "ui/device_list.hpp"
 #include "logger.hpp"
+#include "ui/device_list.hpp"
+#include "ui/file_sender.hpp"
 #include <QApplication>
 #include <QIcon>
 
@@ -234,8 +234,7 @@ void MainWindow::setup_stylesheet() {
     qApp->setStyleSheet(GLOBAL_STYLESHEET);
 }
 
-MainWindow::MainWindow(QWidget* parent)
-    : QMainWindow(parent) {
+MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
     setup_stylesheet();
 

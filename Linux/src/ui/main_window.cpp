@@ -1,7 +1,7 @@
 #include "ui/main_window.hpp"
-#include "ui/file_sender.hpp"
-#include "ui/device_list.hpp"
 #include "logger.hpp"
+#include "ui/device_list.hpp"
+#include "ui/file_sender.hpp"
 #include <iostream>
 
 namespace ui {
@@ -173,14 +173,11 @@ entry:focus {
 
 void MainWindow::setup_css() {
     g_object_set(gtk_settings_get_default(), "gtk-application-prefer-dark-theme", TRUE, NULL);
-    
+
     GtkCssProvider* provider = gtk_css_provider_new();
     gtk_css_provider_load_from_string(provider, CSS_STYLE);
-    gtk_style_context_add_provider_for_display(
-        gdk_display_get_default(),
-        GTK_STYLE_PROVIDER(provider),
-        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION
-    );
+    gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(provider),
+                                               GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
     g_object_unref(provider);
 }
 
@@ -227,8 +224,6 @@ MainWindow::MainWindow(GtkApplication* app) {
     gtk_widget_set_hexpand(switcher, TRUE);
     gtk_widget_set_halign(switcher, GTK_ALIGN_CENTER);
     gtk_box_append(GTK_BOX(top_panel), switcher);
-
-
 
     gtk_widget_set_vexpand(stack_, TRUE);
     gtk_box_append(GTK_BOX(main_box), stack_);

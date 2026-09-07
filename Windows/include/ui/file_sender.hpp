@@ -1,37 +1,37 @@
 #pragma once
 
-#include <QWidget>
+#include <QFrame>
 #include <QLabel>
 #include <QListWidget>
-#include <QPushButton>
 #include <QProgressBar>
-#include <QFrame>
+#include <QPushButton>
 #include <QVBoxLayout>
-#include <vector>
-#include <string>
+#include <QWidget>
 #include <atomic>
+#include <string>
+#include <vector>
 
 namespace ui {
 
 class FileSenderPanel : public QWidget {
     Q_OBJECT
-public:
+  public:
     explicit FileSenderPanel(QWidget* parent = nullptr);
     ~FileSenderPanel() override;
 
-protected:
+  protected:
     void dragEnterEvent(QDragEnterEvent* event) override;
     void dragLeaveEvent(QDragLeaveEvent* event) override;
     void dropEvent(QDropEvent* event) override;
 
-private slots:
+  private slots:
     void on_choose_file();
     void on_choose_folder();
     void on_send_clicked();
     void on_clear_clicked();
     void on_cancel_clicked();
 
-private:
+  private:
     QFrame* drop_area_;
     QLabel* drop_label_;
     QListWidget* file_list_widget_;

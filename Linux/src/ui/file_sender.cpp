@@ -1,10 +1,10 @@
 #include "ui/file_sender.hpp"
-#include "ui/transfer_dialog.hpp"
-#include "logger.hpp"
-#include <algorithm>
-#include <iostream>
-#include <filesystem>
 #include "fluxdrop_core.h"
+#include "logger.hpp"
+#include "ui/transfer_dialog.hpp"
+#include <algorithm>
+#include <filesystem>
+#include <iostream>
 
 namespace fs = std::filesystem;
 
@@ -111,11 +111,18 @@ static gboolean reenable_ui_idle(gpointer data) {
     auto* d = static_cast<ReenableData*>(data);
     if (d->gen == g_sender_gen.load()) {
         FD_LOG("Re-enabling sender UI after transfer");
-        if (GTK_IS_WIDGET(d->send)) { gtk_widget_set_visible(d->send, TRUE); gtk_widget_set_sensitive(d->send, TRUE); }
-        if (GTK_IS_WIDGET(d->clear)) gtk_widget_set_visible(d->clear, TRUE);
-        if (GTK_IS_WIDGET(d->cancel)) gtk_widget_set_visible(d->cancel, FALSE);
-        if (GTK_IS_WIDGET(d->file)) gtk_widget_set_sensitive(d->file, TRUE);
-        if (GTK_IS_WIDGET(d->folder)) gtk_widget_set_sensitive(d->folder, TRUE);
+        if (GTK_IS_WIDGET(d->send)) {
+            gtk_widget_set_visible(d->send, TRUE);
+            gtk_widget_set_sensitive(d->send, TRUE);
+        }
+        if (GTK_IS_WIDGET(d->clear))
+            gtk_widget_set_visible(d->clear, TRUE);
+        if (GTK_IS_WIDGET(d->cancel))
+            gtk_widget_set_visible(d->cancel, FALSE);
+        if (GTK_IS_WIDGET(d->file))
+            gtk_widget_set_sensitive(d->file, TRUE);
+        if (GTK_IS_WIDGET(d->folder))
+            gtk_widget_set_sensitive(d->folder, TRUE);
     } else {
         FD_WARN("Discarding stale reenable idle");
     }
@@ -138,8 +145,7 @@ static std::atomic<bool>* g_running_ptr = nullptr;
 
 // FileSenderPanel
 
-FileSenderPanel::FileSenderPanel(GtkWindow* parent_window)
-    : parent_window_(parent_window) {
+FileSenderPanel::FileSenderPanel(GtkWindow* parent_window) : parent_window_(parent_window) {
 
     FD_LOG("FileSenderPanel created");
 
@@ -190,8 +196,7 @@ FileSenderPanel::FileSenderPanel(GtkWindow* parent_window)
     GtkWidget* scroll = gtk_scrolled_window_new();
     gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scroll), 120);
     gtk_widget_set_vexpand(scroll, TRUE);
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
-                                   GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
     gtk_widget_add_css_class(scroll, "file-list-scroll");
 
     file_list_box_ = gtk_list_box_new();
@@ -246,9 +251,9 @@ FileSenderPanel::FileSenderPanel(GtkWindow* parent_window)
 
 FileSenderPanel::~FileSenderPanel() {
     FD_LOG("~FileSenderPanel — cleaning up");
-    g_sender_gen++;  // Invalidate any pending idles
+    g_sender_gen++; // Invalidate any pending idles
     server_running_ = false;
-    fd_cancel_server();  // Blocking cancel on destruction is OK
+    fd_cancel_server(); // Blocking cancel on destruction is OK
     FD_LOG("~FileSenderPanel — done");
 }
 
@@ -297,7 +302,10 @@ void FileSenderPanel::update_file_list_ui() {
             double size = static_cast<double>(fsize);
             const char* units[] = {"B", "KB", "MB", "GB"};
             int i = 0;
-            while (size >= 1024 && i < 3) { size /= 1024; i++; }
+            while (size >= 1024 && i < 3) {
+                size /= 1024;
+                i++;
+            }
             char buf[64];
             snprintf(buf, sizeof(buf), " (%.1f %s)", size, units[i]);
             display += buf;
@@ -328,7 +336,8 @@ void FileSenderPanel::start_server() {
     gtk_widget_set_visible(send_button_, FALSE);
     gtk_widget_set_visible(clear_button_, FALSE);
     GtkWidget* cancel_btn = static_cast<GtkWidget*>(g_object_get_data(G_OBJECT(send_button_), "cancel-btn"));
-    if (cancel_btn) gtk_widget_set_visible(cancel_btn, TRUE);
+    if (cancel_btn)
+        gtk_widget_set_visible(cancel_btn, TRUE);
 
     gtk_widget_set_sensitive(choose_file_button_, FALSE);
     gtk_widget_set_sensitive(choose_folder_button_, FALSE);
@@ -359,12 +368,10 @@ void FileSenderPanel::start_server() {
     auto ready_cb = [](const char* ip, int port, int pin) {
         FD_LOG("Server ready: " << ip << ":" << port << " PIN=" << pin);
         uint64_t gen = g_sender_gen.load();
-        g_idle_add(update_pin_idle, new PinUpdateData{
-            g_pin_lbl, g_status_lbl,
-            "PIN: " + std::to_string(pin),
-            "Listening on " + std::string(ip) + ":" + std::to_string(port) + " — Waiting for receiver...",
-            gen
-        });
+        g_idle_add(update_pin_idle, new PinUpdateData{g_pin_lbl, g_status_lbl, "PIN: " + std::to_string(pin),
+                                                      "Listening on " + std::string(ip) + ":" + std::to_string(port) +
+                                                          " — Waiting for receiver...",
+                                                      gen});
     };
 
     auto status_cb = [](const char* msg) {
@@ -376,15 +383,12 @@ void FileSenderPanel::start_server() {
     auto error_cb = [](const char* err) {
         FD_ERR("Server error: " << err);
         uint64_t gen = g_sender_gen.load();
-        g_idle_add(transfer_complete_idle, new TransferCompleteData{
-            g_status_lbl, g_progress_br, g_progress_lbl, g_send_btn,
-            "❌ Error: " + std::string(err), gen
-        });
-        g_idle_add(reenable_ui_idle, new ReenableData{
-            g_send_btn, g_clear_btn_widget, g_cancel_btn,
-            g_choose_file_btn, g_choose_folder_btn, gen
-        });
-        if (g_running_ptr) *g_running_ptr = false;
+        g_idle_add(transfer_complete_idle, new TransferCompleteData{g_status_lbl, g_progress_br, g_progress_lbl,
+                                                                    g_send_btn, "❌ Error: " + std::string(err), gen});
+        g_idle_add(reenable_ui_idle, new ReenableData{g_send_btn, g_clear_btn_widget, g_cancel_btn, g_choose_file_btn,
+                                                      g_choose_folder_btn, gen});
+        if (g_running_ptr)
+            *g_running_ptr = false;
     };
 
     auto progress_cb = [](const char* filename, uint64_t transferred, uint64_t total, double speed) {
@@ -399,19 +403,16 @@ void FileSenderPanel::start_server() {
     auto complete_cb = []() {
         FD_LOG("Server transfer complete");
         uint64_t gen = g_sender_gen.load();
-        g_idle_add(transfer_complete_idle, new TransferCompleteData{
-            g_status_lbl, g_progress_br, g_progress_lbl, g_send_btn,
-            "✅ All files transferred successfully!", gen
-        });
-        g_idle_add(reenable_ui_idle, new ReenableData{
-            g_send_btn, g_clear_btn_widget, g_cancel_btn,
-            g_choose_file_btn, g_choose_folder_btn, gen
-        });
-        if (g_running_ptr) *g_running_ptr = false;
+        g_idle_add(transfer_complete_idle,
+                   new TransferCompleteData{g_status_lbl, g_progress_br, g_progress_lbl, g_send_btn,
+                                            "✅ All files transferred successfully!", gen});
+        g_idle_add(reenable_ui_idle, new ReenableData{g_send_btn, g_clear_btn_widget, g_cancel_btn, g_choose_file_btn,
+                                                      g_choose_folder_btn, gen});
+        if (g_running_ptr)
+            *g_running_ptr = false;
     };
 
-    fd_start_server(c_paths.data(), c_paths.size(),
-                    ready_cb, status_cb, error_cb, progress_cb, complete_cb);
+    fd_start_server(c_paths.data(), c_paths.size(), ready_cb, status_cb, error_cb, progress_cb, complete_cb);
 }
 
 void FileSenderPanel::cancel_server() {
@@ -436,7 +437,8 @@ void FileSenderPanel::cancel_server() {
     gtk_widget_set_sensitive(choose_folder_button_, TRUE);
 
     GtkWidget* cancel_btn = static_cast<GtkWidget*>(g_object_get_data(G_OBJECT(send_button_), "cancel-btn"));
-    if (cancel_btn) gtk_widget_set_visible(cancel_btn, FALSE);
+    if (cancel_btn)
+        gtk_widget_set_visible(cancel_btn, FALSE);
 
     FD_LOG("cancel_server() — UI reset complete");
 }
@@ -447,62 +449,62 @@ void FileSenderPanel::on_choose_file(GtkButton* /*button*/, gpointer user_data) 
     auto* self = static_cast<FileSenderPanel*>(user_data);
     FD_LOG("Choose file dialog opening");
 
-G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-    GtkFileChooserNative* native = gtk_file_chooser_native_new(
-        "Select Files", self->parent_window_,
-        GTK_FILE_CHOOSER_ACTION_OPEN, "_Open", "_Cancel");
+    G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+    GtkFileChooserNative* native = gtk_file_chooser_native_new("Select Files", self->parent_window_,
+                                                               GTK_FILE_CHOOSER_ACTION_OPEN, "_Open", "_Cancel");
     gtk_file_chooser_set_select_multiple(GTK_FILE_CHOOSER(native), TRUE);
 
     g_signal_connect(native, "response", G_CALLBACK(+[](GtkNativeDialog* dialog, int response, gpointer data) {
-        if (response == GTK_RESPONSE_ACCEPT) {
-            auto* panel = static_cast<FileSenderPanel*>(data);
-            GtkFileChooser* chooser = GTK_FILE_CHOOSER(dialog);
-            GListModel* files = gtk_file_chooser_get_files(chooser);
-            for (guint i = 0; i < g_list_model_get_n_items(files); i++) {
-                GFile* file = G_FILE(g_list_model_get_item(files, i));
-                char* path = g_file_get_path(file);
-                if (path) {
-                    panel->add_path(path);
-                    g_free(path);
-                }
-                g_object_unref(file);
-            }
-            g_object_unref(files);
-        }
-        g_object_unref(dialog);
-    }), self);
+                         if (response == GTK_RESPONSE_ACCEPT) {
+                             auto* panel = static_cast<FileSenderPanel*>(data);
+                             GtkFileChooser* chooser = GTK_FILE_CHOOSER(dialog);
+                             GListModel* files = gtk_file_chooser_get_files(chooser);
+                             for (guint i = 0; i < g_list_model_get_n_items(files); i++) {
+                                 GFile* file = G_FILE(g_list_model_get_item(files, i));
+                                 char* path = g_file_get_path(file);
+                                 if (path) {
+                                     panel->add_path(path);
+                                     g_free(path);
+                                 }
+                                 g_object_unref(file);
+                             }
+                             g_object_unref(files);
+                         }
+                         g_object_unref(dialog);
+                     }),
+                     self);
 
     gtk_native_dialog_show(GTK_NATIVE_DIALOG(native));
-G_GNUC_END_IGNORE_DEPRECATIONS
+    G_GNUC_END_IGNORE_DEPRECATIONS
 }
 
 void FileSenderPanel::on_choose_folder(GtkButton* /*button*/, gpointer user_data) {
     auto* self = static_cast<FileSenderPanel*>(user_data);
     FD_LOG("Choose folder dialog opening");
 
-G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+    G_GNUC_BEGIN_IGNORE_DEPRECATIONS
     GtkFileChooserNative* native = gtk_file_chooser_native_new(
-        "Select Folder", self->parent_window_,
-        GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER, "_Open", "_Cancel");
+        "Select Folder", self->parent_window_, GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER, "_Open", "_Cancel");
 
     g_signal_connect(native, "response", G_CALLBACK(+[](GtkNativeDialog* dialog, int response, gpointer data) {
-        if (response == GTK_RESPONSE_ACCEPT) {
-            auto* panel = static_cast<FileSenderPanel*>(data);
-            GFile* folder = gtk_file_chooser_get_file(GTK_FILE_CHOOSER(dialog));
-            if (folder) {
-                char* path = g_file_get_path(folder);
-                if (path) {
-                    panel->add_path(path);
-                    g_free(path);
-                }
-                g_object_unref(folder);
-            }
-        }
-        g_object_unref(dialog);
-    }), self);
+                         if (response == GTK_RESPONSE_ACCEPT) {
+                             auto* panel = static_cast<FileSenderPanel*>(data);
+                             GFile* folder = gtk_file_chooser_get_file(GTK_FILE_CHOOSER(dialog));
+                             if (folder) {
+                                 char* path = g_file_get_path(folder);
+                                 if (path) {
+                                     panel->add_path(path);
+                                     g_free(path);
+                                 }
+                                 g_object_unref(folder);
+                             }
+                         }
+                         g_object_unref(dialog);
+                     }),
+                     self);
 
     gtk_native_dialog_show(GTK_NATIVE_DIALOG(native));
-G_GNUC_END_IGNORE_DEPRECATIONS
+    G_GNUC_END_IGNORE_DEPRECATIONS
 }
 
 void FileSenderPanel::on_send_clicked(GtkButton* /*button*/, gpointer user_data) {
@@ -527,8 +529,8 @@ void FileSenderPanel::on_cancel_clicked(GtkButton* /*button*/, gpointer user_dat
     self->cancel_server();
 }
 
-gboolean FileSenderPanel::on_drop(GtkDropTarget* /*target*/, const GValue* value,
-                                   double /*x*/, double /*y*/, gpointer user_data) {
+gboolean FileSenderPanel::on_drop(GtkDropTarget* /*target*/, const GValue* value, double /*x*/, double /*y*/,
+                                  gpointer user_data) {
     auto* self = static_cast<FileSenderPanel*>(user_data);
     FD_LOG("File drop received");
 

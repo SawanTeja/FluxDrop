@@ -1,8 +1,8 @@
 #include "protocol/packet.hpp"
 #ifdef _WIN32
-  #include <winsock2.h>
+#include <winsock2.h>
 #else
-  #include <arpa/inet.h>
+#include <arpa/inet.h>
 #endif
 #include <cstring>
 #include <stdexcept>
@@ -27,7 +27,7 @@ std::array<uint8_t, 16> serialize_header(const PacketHeader& header) {
 PacketHeader deserialize_header(const std::array<uint8_t, 16>& buffer) {
     PacketHeader header;
     uint32_t cmd, payload, session, res;
-    
+
     std::memcpy(&cmd, buffer.data(), 4);
     std::memcpy(&payload, buffer.data() + 4, 4);
     std::memcpy(&session, buffer.data() + 8, 4);

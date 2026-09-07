@@ -1,25 +1,25 @@
 #pragma once
 
-#include <QWidget>
+#include "fluxdrop_core.h"
+#include "networking.hpp"
+#include <QFrame>
 #include <QLabel>
 #include <QListWidget>
-#include <QPushButton>
 #include <QProgressBar>
-#include <QFrame>
+#include <QPushButton>
 #include <QVBoxLayout>
-#include "networking.hpp"
-#include "fluxdrop_core.h"
+#include <QWidget>
+#include <atomic>
+#include <future>
 #include <map>
 #include <mutex>
 #include <string>
-#include <atomic>
-#include <future>
 
 namespace ui {
 
 class DeviceListPanel : public QWidget {
     Q_OBJECT
-public:
+  public:
     explicit DeviceListPanel(QWidget* parent = nullptr);
     ~DeviceListPanel() override;
 
@@ -36,13 +36,13 @@ public:
 
     void clear_and_restart_discovery();
 
-private slots:
+  private slots:
     void on_device_row_clicked(QListWidgetItem* item);
     void on_manual_connect();
     void on_change_save_dir();
     void on_cancel_transfer();
 
-private:
+  private:
     QListWidget* list_widget_;
     QLabel* info_label_;
     QLabel* save_label_;

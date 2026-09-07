@@ -1,14 +1,14 @@
 #include "fluxdrop_core.h"
 #include "networking.hpp"
 
-#include <memory>
-#include <string>
-#include <vector>
-#include <queue>
-#include <thread>
 #include <atomic>
 #include <filesystem>
 #include <iostream>
+#include <memory>
+#include <queue>
+#include <string>
+#include <thread>
+#include <vector>
 
 namespace fs = std::filesystem;
 
@@ -54,11 +54,8 @@ void fd_cleanup() {
 
 // Server Functions
 
-void fd_start_server(const char** file_paths, int num_files,
-                     fd_server_ready_cb ready_cb,
-                     fd_server_status_cb status_cb,
-                     fd_server_error_cb error_cb,
-                     fd_server_progress_cb progress_cb,
+void fd_start_server(const char** file_paths, int num_files, fd_server_ready_cb ready_cb, fd_server_status_cb status_cb,
+                     fd_server_error_cb error_cb, fd_server_progress_cb progress_cb,
                      fd_server_complete_cb complete_cb) {
 
     CORE_LOG("fd_start_server() — " << num_files << " paths");
@@ -96,7 +93,8 @@ void fd_start_server(const char** file_paths, int num_files,
 
     if (jobs.empty()) {
         CORE_LOG("fd_start_server() — no valid files found");
-        if (error_cb) error_cb("No valid files found to send.");
+        if (error_cb)
+            error_cb("No valid files found to send.");
         return;
     }
 
@@ -104,19 +102,24 @@ void fd_start_server(const char** file_paths, int num_files,
 
     networking::ServerCallbacks callbacks;
     callbacks.on_ready = [ready_cb](const std::string& ip, unsigned short port, uint16_t pin) {
-        if (ready_cb) ready_cb(ip.c_str(), port, pin);
+        if (ready_cb)
+            ready_cb(ip.c_str(), port, pin);
     };
     callbacks.on_status = [status_cb](const std::string& msg) {
-        if (status_cb) status_cb(msg.c_str());
+        if (status_cb)
+            status_cb(msg.c_str());
     };
     callbacks.on_error = [error_cb](const std::string& err) {
-        if (error_cb) error_cb(err.c_str());
+        if (error_cb)
+            error_cb(err.c_str());
     };
     callbacks.on_progress = [progress_cb](const std::string& file, uint64_t transferred, uint64_t total, double speed) {
-        if (progress_cb) progress_cb(file.c_str(), transferred, total, speed);
+        if (progress_cb)
+            progress_cb(file.c_str(), transferred, total, speed);
     };
     callbacks.on_complete = [complete_cb]() {
-        if (complete_cb) complete_cb();
+        if (complete_cb)
+            complete_cb();
     };
     callbacks.cancel_flag = &g_server_cancel_flag;
 
@@ -179,12 +182,9 @@ void fd_stop_discovery() {
     }
 }
 
-void fd_connect(const char* ip, int port, const char* pin, const char* save_dir,
-                fd_client_status_cb status_cb,
-                fd_client_error_cb error_cb,
-                fd_client_file_request_cb file_request_cb,
-                fd_client_progress_cb progress_cb,
-                fd_client_complete_cb complete_cb) {
+void fd_connect(const char* ip, int port, const char* pin, const char* save_dir, fd_client_status_cb status_cb,
+                fd_client_error_cb error_cb, fd_client_file_request_cb file_request_cb,
+                fd_client_progress_cb progress_cb, fd_client_complete_cb complete_cb) {
 
     CORE_LOG("fd_connect() — " << (ip ? ip : "null") << ":" << port);
 
@@ -197,20 +197,25 @@ void fd_connect(const char* ip, int port, const char* pin, const char* save_dir,
 
     networking::ClientCallbacks callbacks;
     callbacks.on_status = [status_cb](const std::string& msg) {
-        if (status_cb) status_cb(msg.c_str());
+        if (status_cb)
+            status_cb(msg.c_str());
     };
     callbacks.on_error = [error_cb](const std::string& err) {
-        if (error_cb) error_cb(err.c_str());
+        if (error_cb)
+            error_cb(err.c_str());
     };
     callbacks.on_file_request = [file_request_cb](const std::string& file, uint64_t size) -> bool {
-        if (file_request_cb) return file_request_cb(file.c_str(), size);
+        if (file_request_cb)
+            return file_request_cb(file.c_str(), size);
         return true;
     };
     callbacks.on_progress = [progress_cb](const std::string& file, uint64_t transferred, uint64_t total, double speed) {
-        if (progress_cb) progress_cb(file.c_str(), transferred, total, speed);
+        if (progress_cb)
+            progress_cb(file.c_str(), transferred, total, speed);
     };
     callbacks.on_complete = [complete_cb]() {
-        if (complete_cb) complete_cb();
+        if (complete_cb)
+            complete_cb();
     };
     callbacks.cancel_flag = &g_client_cancel_flag;
 

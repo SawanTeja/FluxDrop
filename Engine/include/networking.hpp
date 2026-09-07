@@ -1,13 +1,13 @@
 #pragma once
 
-#include <string>
-#include <cstdint>
-#include <queue>
-#include <functional>
-#include <thread>
 #include <atomic>
-#include <mutex>
 #include <boost/asio.hpp>
+#include <cstdint>
+#include <functional>
+#include <mutex>
+#include <queue>
+#include <string>
+#include <thread>
 
 namespace networking {
 
@@ -50,21 +50,22 @@ struct ClientCallbacks {
 };
 
 class DiscoveryListener {
-public:
+  public:
     ~DiscoveryListener();
     void start(uint32_t room_id, DeviceFoundCallback callback);
     void stop();
     bool is_running() const { return running_; }
 
-private:
+  private:
     std::atomic<bool> running_{false};
     std::thread thread_;
 };
 class Server {
-public:
+  public:
     void start_gui(std::queue<TransferJob> jobs, ServerCallbacks callbacks);
     void stop();
-private:
+
+  private:
     std::mutex mtx_;
     boost::asio::ip::tcp::acceptor* acceptor_ = nullptr;
     boost::asio::ip::tcp::socket* socket_ = nullptr;
@@ -72,12 +73,12 @@ private:
 };
 
 class Client {
-public:
-    void connect_gui(const std::string& ip, unsigned short port,
-                     const std::string& pin, const std::string& save_dir,
+  public:
+    void connect_gui(const std::string& ip, unsigned short port, const std::string& pin, const std::string& save_dir,
                      ClientCallbacks callbacks);
     void stop();
-private:
+
+  private:
     std::mutex mtx_;
     boost::asio::ip::tcp::socket* socket_ = nullptr;
     bool stopped_ = false;

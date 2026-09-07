@@ -1,20 +1,20 @@
 #pragma once
 
-#include <gtk/gtk.h>
-#include <vector>
-#include <string>
 #include <atomic>
+#include <gtk/gtk.h>
+#include <string>
+#include <vector>
 
 namespace ui {
 
 class FileSenderPanel {
-public:
+  public:
     explicit FileSenderPanel(GtkWindow* parent_window);
     ~FileSenderPanel();
 
     GtkWidget* get_widget() const { return panel_; }
 
-private:
+  private:
     GtkWidget* panel_;
     GtkWidget* drop_area_;
     GtkWidget* drop_label_;
@@ -43,8 +43,7 @@ private:
     static void on_send_clicked(GtkButton* button, gpointer user_data);
     static void on_clear_clicked(GtkButton* button, gpointer user_data);
     static void on_cancel_clicked(GtkButton* button, gpointer user_data);
-    static gboolean on_drop(GtkDropTarget* target, const GValue* value,
-                            double x, double y, gpointer user_data);
+    static gboolean on_drop(GtkDropTarget* target, const GValue* value, double x, double y, gpointer user_data);
 };
 
 } // namespace ui

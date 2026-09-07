@@ -1,10 +1,10 @@
 #include "ui/device_list.hpp"
-#include "ui/transfer_dialog.hpp"
 #include "logger.hpp"
-#include <QFileDialog>
+#include "ui/transfer_dialog.hpp"
 #include <QDialog>
-#include <QLineEdit>
+#include <QFileDialog>
 #include <QHBoxLayout>
+#include <QLineEdit>
 #include <QScrollArea>
 #include <QStandardPaths>
 #include <QStyle>
@@ -18,8 +18,7 @@ static std::atomic<uint64_t> g_recv_gen{0};
 // Static context for C callbacks
 static DeviceListPanel* g_client_panel = nullptr;
 
-DeviceListPanel::DeviceListPanel(QWidget* parent)
-    : QWidget(parent), parent_window_(parent) {
+DeviceListPanel::DeviceListPanel(QWidget* parent) : QWidget(parent), parent_window_(parent) {
 
     FD_LOG("DeviceListPanel created");
 
@@ -127,7 +126,8 @@ void DeviceListPanel::start_discovery() {
     static DeviceListPanel* g_panel;
     g_panel = this;
     fd_start_discovery(482913, [](const fd_device_t* dev) {
-        if (!dev) return;
+        if (!dev)
+            return;
         networking::DiscoveredDevice cpp_dev;
         cpp_dev.ip = dev->ip;
         cpp_dev.port = dev->port;
@@ -145,7 +145,8 @@ void DeviceListPanel::on_device_found(const networking::DiscoveredDevice& device
     std::string key = device.ip + ":" + std::to_string(device.port);
     {
         std::lock_guard<std::mutex> lock(devices_mutex_);
-        if (devices_.count(key)) return;
+        if (devices_.count(key))
+            return;
         devices_[key] = device;
     }
 
@@ -153,18 +154,19 @@ void DeviceListPanel::on_device_found(const networking::DiscoveredDevice& device
 
     // Marshal to UI thread — equivalent of g_idle_add(add_device_row_idle, ...)
     auto dev_copy = device;
-    QMetaObject::invokeMethod(this, [this, dev_copy]() {
-        QString text = QString::fromUtf8("💻  FluxDrop Device — ") +
-                       QString::fromStdString(dev_copy.ip) +
-                       " — Room " + QString::number(dev_copy.session_id) +
-                       "  →";
+    QMetaObject::invokeMethod(
+        this,
+        [this, dev_copy]() {
+            QString text = QString::fromUtf8("💻  FluxDrop Device — ") + QString::fromStdString(dev_copy.ip) +
+                           " — Room " + QString::number(dev_copy.session_id) + "  →";
 
-        auto* item = new QListWidgetItem(text, list_widget_);
-        item->setData(Qt::UserRole, QString::fromStdString(dev_copy.ip));
-        item->setData(Qt::UserRole + 1, dev_copy.port);
-        item->setData(Qt::UserRole + 2, dev_copy.session_id);
-        item->setSizeHint(QSize(0, 50));
-    }, Qt::QueuedConnection);
+            auto* item = new QListWidgetItem(text, list_widget_);
+            item->setData(Qt::UserRole, QString::fromStdString(dev_copy.ip));
+            item->setData(Qt::UserRole + 1, dev_copy.port);
+            item->setData(Qt::UserRole + 2, dev_copy.session_id);
+            item->setSizeHint(QSize(0, 50));
+        },
+        Qt::QueuedConnection);
 }
 
 void DeviceListPanel::clear_and_restart_discovery() {
@@ -173,9 +175,7 @@ void DeviceListPanel::clear_and_restart_discovery() {
         std::lock_guard<std::mutex> lock(devices_mutex_);
         devices_.clear();
     }
-    QMetaObject::invokeMethod(this, [this]() {
-        list_widget_->clear();
-    }, Qt::QueuedConnection);
+    QMetaObject::invokeMethod(this, [this]() { list_widget_->clear(); }, Qt::QueuedConnection);
     stop_discovery();
     start_discovery();
 }
@@ -251,10 +251,14 @@ void DeviceListPanel::connect_to_device(const networking::DiscoveredDevice& devi
             FD_LOG("Client status: " << msg);
             uint64_t gen = g_recv_gen.load();
             QString text = QString::fromUtf8(msg);
-            QMetaObject::invokeMethod(g_client_panel->status_label_, [gen, text]() {
-                if (gen != g_recv_gen.load()) return;
-                g_client_panel->status_label_->setText(text);
-            }, Qt::QueuedConnection);
+            QMetaObject::invokeMethod(
+                g_client_panel->status_label_,
+                [gen, text]() {
+                    if (gen != g_recv_gen.load())
+                        return;
+                    g_client_panel->status_label_->setText(text);
+                },
+                Qt::QueuedConnection);
         };
 
         auto error_cb = [](const char* err) {
@@ -266,15 +270,20 @@ void DeviceListPanel::connect_to_device(const networking::DiscoveredDevice& devi
             auto bracket = msg.find('[');
             if (bracket != std::string::npos && bracket > 0) {
                 msg = msg.substr(0, bracket);
-                while (!msg.empty() && (msg.back() == ' ' || msg.back() == ':')) msg.pop_back();
+                while (!msg.empty() && (msg.back() == ' ' || msg.back() == ':'))
+                    msg.pop_back();
             }
             QString error_text = "Error: " + QString::fromStdString(msg);
-            QMetaObject::invokeMethod(g_client_panel->status_label_, [gen, error_text]() {
-                if (gen != g_recv_gen.load()) return;
-                g_client_panel->status_label_->setText(error_text);
-                g_client_panel->progress_bar_->setValue(1000);
-                g_client_panel->cancel_button_->setVisible(false);
-            }, Qt::QueuedConnection);
+            QMetaObject::invokeMethod(
+                g_client_panel->status_label_,
+                [gen, error_text]() {
+                    if (gen != g_recv_gen.load())
+                        return;
+                    g_client_panel->status_label_->setText(error_text);
+                    g_client_panel->progress_bar_->setValue(1000);
+                    g_client_panel->cancel_button_->setVisible(false);
+                },
+                Qt::QueuedConnection);
             g_client_panel->clear_and_restart_discovery();
         };
 
@@ -285,70 +294,71 @@ void DeviceListPanel::connect_to_device(const networking::DiscoveredDevice& devi
 
             QString fname = QString::fromUtf8(filename);
             double size_mb = static_cast<double>(size) / (1024.0 * 1024.0);
-            QString prompt_text = QString("Accept incoming file?\n\n%1\n%2 MB")
-                                      .arg(fname)
-                                      .arg(size_mb, 0, 'f', 1);
+            QString prompt_text = QString("Accept incoming file?\n\n%1\n%2 MB").arg(fname).arg(size_mb, 0, 'f', 1);
             std::promise<bool>* prom_ptr = &prom;
 
-            QMetaObject::invokeMethod(g_client_panel, [prom_ptr, prompt_text]() {
-                auto* dialog = new QDialog(g_client_panel->window());
-                dialog->setWindowTitle("Incoming File");
-                dialog->resize(350, 150);
-                dialog->setModal(true);
+            QMetaObject::invokeMethod(
+                g_client_panel,
+                [prom_ptr, prompt_text]() {
+                    auto* dialog = new QDialog(g_client_panel->window());
+                    dialog->setWindowTitle("Incoming File");
+                    dialog->resize(350, 150);
+                    dialog->setModal(true);
 
-                auto* vbox = new QVBoxLayout(dialog);
-                vbox->setContentsMargins(24, 24, 24, 24);
-                vbox->setSpacing(12);
+                    auto* vbox = new QVBoxLayout(dialog);
+                    vbox->setContentsMargins(24, 24, 24, 24);
+                    vbox->setSpacing(12);
 
-                auto* label = new QLabel(prompt_text, dialog);
-                label->setProperty("cssClass", "title-text");
-                vbox->addWidget(label);
+                    auto* label = new QLabel(prompt_text, dialog);
+                    label->setProperty("cssClass", "title-text");
+                    vbox->addWidget(label);
 
-                auto* hbox = new QHBoxLayout();
-                hbox->setAlignment(Qt::AlignCenter);
+                    auto* hbox = new QHBoxLayout();
+                    hbox->setAlignment(Qt::AlignCenter);
 
-                auto* reject_btn = new QPushButton("Reject", dialog);
-                reject_btn->setProperty("cssClass", "destructive-action");
-                hbox->addWidget(reject_btn);
+                    auto* reject_btn = new QPushButton("Reject", dialog);
+                    reject_btn->setProperty("cssClass", "destructive-action");
+                    hbox->addWidget(reject_btn);
 
-                auto* accept_btn = new QPushButton("Accept", dialog);
-                accept_btn->setProperty("cssClass", "suggested-action");
-                hbox->addWidget(accept_btn);
+                    auto* accept_btn = new QPushButton("Accept", dialog);
+                    accept_btn->setProperty("cssClass", "suggested-action");
+                    hbox->addWidget(accept_btn);
 
-                vbox->addLayout(hbox);
+                    vbox->addLayout(hbox);
 
-                bool* answered = new bool(false);
+                    bool* answered = new bool(false);
 
-                QObject::connect(accept_btn, &QPushButton::clicked, dialog, [dialog, prom_ptr, answered]() {
-                    if (!*answered) {
-                        FD_LOG("File request: ACCEPTED");
-                        prom_ptr->set_value(true);
-                        *answered = true;
-                    }
-                    dialog->close();
-                });
+                    QObject::connect(accept_btn, &QPushButton::clicked, dialog, [dialog, prom_ptr, answered]() {
+                        if (!*answered) {
+                            FD_LOG("File request: ACCEPTED");
+                            prom_ptr->set_value(true);
+                            *answered = true;
+                        }
+                        dialog->close();
+                    });
 
-                QObject::connect(reject_btn, &QPushButton::clicked, dialog, [dialog, prom_ptr, answered]() {
-                    if (!*answered) {
-                        FD_LOG("File request: REJECTED");
-                        prom_ptr->set_value(false);
-                        *answered = true;
-                    }
-                    dialog->close();
-                });
+                    QObject::connect(reject_btn, &QPushButton::clicked, dialog, [dialog, prom_ptr, answered]() {
+                        if (!*answered) {
+                            FD_LOG("File request: REJECTED");
+                            prom_ptr->set_value(false);
+                            *answered = true;
+                        }
+                        dialog->close();
+                    });
 
-                QObject::connect(dialog, &QDialog::destroyed, [prom_ptr, answered]() {
-                    if (!*answered) {
-                        FD_WARN("File request dialog destroyed without answer — rejecting");
-                        prom_ptr->set_value(false);
-                        *answered = true;
-                    }
-                    delete answered;
-                });
+                    QObject::connect(dialog, &QDialog::destroyed, [prom_ptr, answered]() {
+                        if (!*answered) {
+                            FD_WARN("File request dialog destroyed without answer — rejecting");
+                            prom_ptr->set_value(false);
+                            *answered = true;
+                        }
+                        delete answered;
+                    });
 
-                dialog->setAttribute(Qt::WA_DeleteOnClose);
-                dialog->show();
-            }, Qt::QueuedConnection);
+                    dialog->setAttribute(Qt::WA_DeleteOnClose);
+                    dialog->show();
+                },
+                Qt::QueuedConnection);
 
             while (fut.wait_for(std::chrono::milliseconds(200)) != std::future_status::ready) {
                 if (!g_client_panel->transferring_) {
@@ -367,38 +377,51 @@ void DeviceListPanel::connect_to_device(const networking::DiscoveredDevice& devi
             uint64_t gen = g_recv_gen.load();
             int value = static_cast<int>(frac * 1000);
             QString text = QString::fromUtf8(buf);
-            QMetaObject::invokeMethod(g_client_panel->progress_bar_, [gen, value]() {
-                if (gen != g_recv_gen.load()) return;
-                g_client_panel->progress_bar_->setValue(value);
-            }, Qt::QueuedConnection);
-            QMetaObject::invokeMethod(g_client_panel->progress_label_, [gen, text]() {
-                if (gen != g_recv_gen.load()) return;
-                g_client_panel->progress_label_->setText(text);
-            }, Qt::QueuedConnection);
+            QMetaObject::invokeMethod(
+                g_client_panel->progress_bar_,
+                [gen, value]() {
+                    if (gen != g_recv_gen.load())
+                        return;
+                    g_client_panel->progress_bar_->setValue(value);
+                },
+                Qt::QueuedConnection);
+            QMetaObject::invokeMethod(
+                g_client_panel->progress_label_,
+                [gen, text]() {
+                    if (gen != g_recv_gen.load())
+                        return;
+                    g_client_panel->progress_label_->setText(text);
+                },
+                Qt::QueuedConnection);
         };
 
         auto complete_cb = []() {
             FD_LOG("Client transfer complete");
             uint64_t gen = g_recv_gen.load();
             g_client_panel->transferring_ = false;
-            QMetaObject::invokeMethod(g_client_panel->status_label_, [gen]() {
-                if (gen != g_recv_gen.load()) return;
-                g_client_panel->status_label_->setText(QString::fromUtf8("✅ All files received!"));
-                g_client_panel->progress_bar_->setValue(1000);
-                g_client_panel->cancel_button_->setVisible(false);
-            }, Qt::QueuedConnection);
+            QMetaObject::invokeMethod(
+                g_client_panel->status_label_,
+                [gen]() {
+                    if (gen != g_recv_gen.load())
+                        return;
+                    g_client_panel->status_label_->setText(QString::fromUtf8("✅ All files received!"));
+                    g_client_panel->progress_bar_->setValue(1000);
+                    g_client_panel->cancel_button_->setVisible(false);
+                },
+                Qt::QueuedConnection);
             g_client_panel->clear_and_restart_discovery();
         };
 
-        fd_connect(dev_copy.ip.c_str(), dev_copy.port, pin.c_str(), save_dir_copy.c_str(),
-                   status_cb, error_cb, file_request_cb, progress_cb, complete_cb);
+        fd_connect(dev_copy.ip.c_str(), dev_copy.port, pin.c_str(), save_dir_copy.c_str(), status_cb, error_cb,
+                   file_request_cb, progress_cb, complete_cb);
     });
 
     dialog->show();
 }
 
 void DeviceListPanel::on_manual_connect() {
-    if (transferring_) return;
+    if (transferring_)
+        return;
 
     auto* dialog = new QDialog(window());
     dialog->setWindowTitle("Connect by IP");
@@ -429,7 +452,8 @@ void DeviceListPanel::on_manual_connect() {
         std::string ip = ip_entry->text().toStdString();
         std::string port_str = port_entry->text().toStdString();
 
-        if (ip.empty() || port_str.empty()) return;
+        if (ip.empty() || port_str.empty())
+            return;
 
         networking::DiscoveredDevice device;
         device.ip = ip;
@@ -445,8 +469,7 @@ void DeviceListPanel::on_manual_connect() {
 }
 
 void DeviceListPanel::on_change_save_dir() {
-    QString dir = QFileDialog::getExistingDirectory(this, "Select Save Folder",
-                                                     QString::fromStdString(save_dir_));
+    QString dir = QFileDialog::getExistingDirectory(this, "Select Save Folder", QString::fromStdString(save_dir_));
     if (!dir.isEmpty()) {
         save_dir_ = dir.toStdString();
         save_label_->setText(dir);
