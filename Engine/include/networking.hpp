@@ -62,7 +62,6 @@ private:
 };
 class Server {
 public:
-    void start(std::queue<TransferJob> jobs);
     void start_gui(std::queue<TransferJob> jobs, ServerCallbacks callbacks);
     void stop();
 private:
@@ -74,8 +73,6 @@ private:
 
 class Client {
 public:
-    void connect(const std::string& ip, unsigned short port);
-    void join(uint32_t room_id);
     void connect_gui(const std::string& ip, unsigned short port,
                      const std::string& pin, const std::string& save_dir,
                      ClientCallbacks callbacks);
