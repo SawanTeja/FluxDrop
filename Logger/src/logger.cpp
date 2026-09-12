@@ -2,7 +2,6 @@
 #include <chrono>
 #include <cstdio>
 #include <ctime>
-#include <iostream>
 #include <mutex>
 #include <thread>
 
@@ -75,10 +74,12 @@ void log(Level level, const char* file, int line, const std::string& msg) {
     }
     __android_log_print(android_level, LOG_TAG, "[%s:%d] %s", file_basename(file), line, msg.c_str());
 #else
-    std::cerr << "[FD " << timestamp() << "] "
-              << "[" << level_to_string(level) << "] "
-              << "[" << std::this_thread::get_id() << "] "
-              << "[" << file_basename(file) << ":" << line << "] " << msg << "\n";
+    fprintf(stderr, "[FD %s] [%s] [%s:%d] %s\n", 
+            timestamp().c_str(), 
+            level_to_string(level), 
+            file_basename(file), 
+            line, 
+            msg.c_str());
 #endif
 
 #endif
