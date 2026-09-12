@@ -130,7 +130,7 @@ fun FluxDropApp() {
                             shape = RoundedCornerShape(8.dp)
                         ).padding(8.dp)
                     ) {
-                        Text("Send File", color = Color.White)
+                        Text("Host Session", color = Color.White)
                     }
                     Tab(
                         selected = pagerState.currentPage == 1,
@@ -140,7 +140,7 @@ fun FluxDropApp() {
                             shape = RoundedCornerShape(8.dp)
                         ).padding(8.dp)
                     ) {
-                        Text("Receive", color = Color.White)
+                        Text("Join Session", color = Color.White)
                     }
                 }
 
