@@ -8,7 +8,7 @@
 #include <chrono>
 #include <filesystem>
 #include <iomanip>
-#include <iostream>
+#include "logger.hpp"
 #include <random>
 #include <stdexcept>
 #include <thread>
@@ -222,7 +222,7 @@ void DiscoveryListener::start(uint32_t room_id, DeviceFoundCallback callback) {
                 }
             }
         } catch (std::exception& e) {
-            std::cerr << "DiscoveryListener Exception: " << e.what() << "\n";
+            FD_LOG_ERR("DiscoveryListener Exception: " << e.what());
         }
     });
 }

@@ -3,8 +3,9 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
-#include <iostream>
 #include <vector>
+
+#include "logger.hpp"
 
 namespace transfer {
 
@@ -18,14 +19,14 @@ bool replace_with_completed_file(const fs::path& part_path, const fs::path& fina
     if (fs::exists(final_path, ec)) {
         fs::remove(final_path, ec);
         if (ec) {
-            std::cerr << "Failed to remove existing destination file: " << final_path << " (" << ec.message() << ")\n";
+            FD_LOG_ERR("Failed to remove existing destination file: " << final_path << " (" << ec.message() << ")");
             return false;
         }
     }
 
     fs::rename(part_path, final_path, ec);
     if (ec) {
-        std::cerr << "Failed to finalize received file: " << final_path << " (" << ec.message() << ")\n";
+        FD_LOG_ERR("Failed to finalize received file: " << final_path << " (" << ec.message() << ")");
         return false;
     }
 
@@ -39,7 +40,7 @@ void MessageSender::send(boost::asio::ip::tcp::socket& socket, const std::string
         std::string msg = message + "\n";
         boost::asio::write(socket, boost::asio::buffer(msg));
     } catch (std::exception& e) {
-        std::cerr << "MessageSender Exception: " << e.what() << "\n";
+        FD_LOG_ERR("MessageSender Exception: " << e.what());
     }
 }
 
@@ -48,7 +49,7 @@ void MessageSender::send_header(boost::asio::ip::tcp::socket& socket, const prot
         auto buf = protocol::serialize_header(header);
         boost::asio::write(socket, boost::asio::buffer(buf));
     } catch (std::exception& e) {
-        std::cerr << "MessageSender Exception: " << e.what() << "\n";
+        FD_LOG_ERR("MessageSender Exception: " << e.what());
     }
 }
 
@@ -63,7 +64,7 @@ void MessageSender::send_file_meta(boost::asio::ip::tcp::socket& socket, const p
         send_header(socket, header);
         boost::asio::write(socket, boost::asio::buffer(payload));
     } catch (std::exception& e) {
-        std::cerr << "MessageSender Exception (meta): " << e.what() << "\n";
+        FD_LOG_ERR("MessageSender Exception (meta): " << e.what());
     }
 }
 
@@ -80,10 +81,10 @@ std::string MessageReceiver::receive(boost::asio::ip::tcp::socket& socket) {
         if (e.code() == boost::asio::error::eof || e.code() == boost::asio::error::operation_aborted) {
             return "";
         }
-        std::cerr << "MessageReceiver Exception: " << e.what() << "\n";
+        FD_LOG_ERR("MessageReceiver Exception: " << e.what());
         return "";
     } catch (std::exception& e) {
-        std::cerr << "MessageReceiver Exception: " << e.what() << "\n";
+        FD_LOG_ERR("MessageReceiver Exception: " << e.what());
         return "";
     }
 }
@@ -98,10 +99,10 @@ protocol::PacketHeader MessageReceiver::receive_header(boost::asio::ip::tcp::soc
         if (e.code() == boost::asio::error::eof || e.code() == boost::asio::error::operation_aborted) {
             return empty_header;
         }
-        std::cerr << "MessageReceiver Exception: " << e.what() << "\n";
+        FD_LOG_ERR("MessageReceiver Exception: " << e.what());
         return empty_header;
     } catch (std::exception& e) {
-        std::cerr << "MessageReceiver Exception: " << e.what() << "\n";
+        FD_LOG_ERR("MessageReceiver Exception: " << e.what());
         return empty_header;
     }
 }
@@ -116,7 +117,7 @@ protocol::FileInfo MessageReceiver::receive_file_meta(boost::asio::ip::tcp::sock
         nlohmann::json j = nlohmann::json::parse(payload);
         info = j.get<protocol::FileInfo>();
     } catch (std::exception& e) {
-        std::cerr << "MessageReceiver Exception (meta): " << e.what() << "\n";
+        FD_LOG_ERR("MessageReceiver Exception (meta): " << e.what());
     }
     return info;
 }
@@ -127,7 +128,7 @@ bool MessageSender::send_file(boost::asio::ip::tcp::socket& socket, const std::s
     try {
         std::ifstream file(filepath, std::ios::binary);
         if (!file.is_open()) {
-            std::cerr << "Could not open file for reading: " << filepath << "\n";
+            FD_LOG_ERR("Could not open file for reading: " << filepath);
             return false;
         }
 
@@ -142,7 +143,7 @@ bool MessageSender::send_file(boost::asio::ip::tcp::socket& socket, const std::s
         std::vector<char> buffer(64 * 1024); // 64KB per chunk
         while (file.read(buffer.data(), buffer.size()) || file.gcount() > 0) {
             if (cancel_flag && cancel_flag->load()) {
-                std::cout << "\nTransfer cancelled locally.\n";
+                FD_LOG_INFO("Transfer cancelled locally: " << filepath);
                 protocol::PacketHeader cancel_header{static_cast<uint32_t>(protocol::CommandType::CANCEL), 0,
                                                      session_id, 0};
                 send_header(socket, cancel_header);
@@ -172,7 +173,7 @@ bool MessageSender::send_file(boost::asio::ip::tcp::socket& socket, const std::s
         }
         return true;
     } catch (std::exception& e) {
-        std::cerr << "MessageSender Exception (send_file): " << e.what() << "\n";
+        FD_LOG_ERR("MessageSender Exception (send_file): " << e.what());
         return false;
     }
 }
@@ -196,7 +197,7 @@ TransferState MessageReceiver::receive_file(boost::asio::ip::tcp::socket& socket
 
         std::ofstream file(part_path, mode);
         if (!file.is_open()) {
-            std::cerr << "Could not open file for writing: " << part_path << "\n";
+            FD_LOG_ERR("Could not open file for writing: " << part_path);
             return TransferState::FAILED;
         }
 
@@ -206,7 +207,7 @@ TransferState MessageReceiver::receive_file(boost::asio::ip::tcp::socket& socket
 
         while (total_received < expected_size) {
             if (cancel_flag && cancel_flag->load()) {
-                std::cout << "\nTransfer cancelled locally.\n";
+                FD_LOG_INFO("Transfer cancelled locally.");
                 file.close();
                 protocol::PacketHeader cancel_header{static_cast<uint32_t>(protocol::CommandType::CANCEL), 0, 0, 0};
                 MessageSender::send_header(socket, cancel_header);
@@ -233,24 +234,12 @@ TransferState MessageReceiver::receive_file(boost::asio::ip::tcp::socket& socket
 
                     if (progress_cb) {
                         progress_cb(filepath, total_received, expected_size, speed_mbps);
-                    } else {
-                        int percent =
-                            (expected_size > 0) ? static_cast<int>((total_received * 100.0) / expected_size) : 100;
-                        uint64_t remaining_bytes = expected_size - total_received;
-                        double eta_seconds = (speed_bps > 0) ? (remaining_bytes / speed_bps) : 0;
-                        int eta_min = static_cast<int>(eta_seconds) / 60;
-                        int eta_sec = static_cast<int>(eta_seconds) % 60;
-
-                        std::cout << "\r" << percent << "% | " << std::fixed << std::setprecision(1) << speed_mbps
-                                  << " MB/s | "
-                                  << "ETA " << std::setfill('0') << std::setw(2) << eta_min << ":" << std::setfill('0')
-                                  << std::setw(2) << eta_sec << "    " << std::flush;
                     }
                     last_print_time = now;
                 }
 
             } else if (header.command == static_cast<uint32_t>(protocol::CommandType::CANCEL)) {
-                std::cout << "\nTransfer cancelled by sender.\n";
+                FD_LOG_INFO("Transfer cancelled by sender.");
                 file.close();
                 std::error_code ec;
                 fs::remove(part_path, ec);
@@ -262,8 +251,7 @@ TransferState MessageReceiver::receive_file(boost::asio::ip::tcp::socket& socket
             }
         }
         if (!progress_cb) {
-            std::cout << "\r                                                                 " << std::flush;
-            std::cout << "\nFile transfer completed successfully.\n";
+            FD_LOG_INFO("File transfer completed successfully.");
         }
         file.close();
 
@@ -273,7 +261,7 @@ TransferState MessageReceiver::receive_file(boost::asio::ip::tcp::socket& socket
 
         return TransferState::COMPLETED;
     } catch (std::exception& e) {
-        std::cerr << "\nMessageReceiver Exception (receive_file): " << e.what() << "\n";
+        FD_LOG_ERR("MessageReceiver Exception (receive_file): " << e.what());
         return TransferState::FAILED;
     }
 }

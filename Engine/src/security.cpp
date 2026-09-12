@@ -1,6 +1,6 @@
 #include "security.hpp"
 #include <iomanip>
-#include <iostream>
+#include "logger.hpp"
 #include <random>
 #include <sodium.h>
 #include <sstream>
@@ -9,7 +9,7 @@ namespace security {
 
 uint16_t generate_pin() {
     if (sodium_init() < 0) {
-        std::cerr << "libsodium initialization failed!\n";
+        FD_LOG_ERR("libsodium initialization failed!");
         std::random_device rd;
         std::mt19937 gen(rd());
         std::uniform_int_distribution<uint16_t> dist(1000, 9999);
@@ -20,7 +20,7 @@ uint16_t generate_pin() {
 
 std::string hash_pin(const std::string& pin) {
     if (sodium_init() < 0) {
-        std::cerr << "libsodium initialization failed!\n";
+        FD_LOG_ERR("libsodium initialization failed!");
         return "";
     }
 
