@@ -1,5 +1,6 @@
 #include "fluxdrop_core.h"
 #include "networking.hpp"
+#include "session.hpp"
 
 #include <atomic>
 #include <filesystem>
@@ -49,6 +50,7 @@ void fd_cleanup() {
     fd_cancel_server();
     fd_cancel_client();
     fd_stop_discovery();
+    fd_session_disconnect();
     CORE_LOG("fd_cleanup() — done");
 }
 
@@ -255,6 +257,192 @@ void fd_request_cancel_client() {
     if (g_client) {
         g_client->stop();
     }
+}
+
+// ──── Session-Based API Implementation ────
+
+static std::unique_ptr<networking::Session> g_session;
+static std::thread g_session_thread;
+
+void fd_session_host(fd_session_ready_cb ready_cb, fd_session_established_cb established_cb,
+                     fd_session_ended_cb ended_cb, fd_session_status_cb status_cb, fd_session_error_cb error_cb,
+                     fd_session_file_offer_cb file_offer_cb, fd_session_progress_cb progress_cb,
+                     fd_session_file_complete_cb file_complete_cb) {
+
+    CORE_LOG("fd_session_host()");
+
+    // Clean up any previous session
+    fd_session_disconnect();
+
+    g_session = std::make_unique<networking::Session>();
+
+    networking::SessionCallbacks callbacks;
+    callbacks.on_ready = [ready_cb](const std::string& ip, unsigned short port, uint16_t pin) {
+        if (ready_cb)
+            ready_cb(ip.c_str(), port, pin);
+    };
+    callbacks.on_session_established = [established_cb](const networking::SessionInfo& info) {
+        if (established_cb) {
+            static thread_local std::string ip_storage;
+            ip_storage = info.peer_ip;
+            fd_session_info_t c_info;
+            c_info.session_id = info.session_id;
+            c_info.peer_ip = ip_storage.c_str();
+            c_info.peer_port = info.peer_port;
+            c_info.role = (info.role == networking::SessionRole::HOST) ? 0 : 1;
+            established_cb(&c_info);
+        }
+    };
+    callbacks.on_session_ended = [ended_cb]() {
+        if (ended_cb)
+            ended_cb();
+    };
+    callbacks.on_status = [status_cb](const std::string& msg) {
+        if (status_cb)
+            status_cb(msg.c_str());
+    };
+    callbacks.on_error = [error_cb](const std::string& err) {
+        if (error_cb)
+            error_cb(err.c_str());
+    };
+    callbacks.on_file_offer = [file_offer_cb](const std::string& filename, uint64_t size) -> bool {
+        if (file_offer_cb)
+            return file_offer_cb(filename.c_str(), size);
+        return true;
+    };
+    callbacks.on_progress = [progress_cb](const std::string& file, uint64_t transferred, uint64_t total, double speed) {
+        if (progress_cb)
+            progress_cb(file.c_str(), transferred, total, speed);
+    };
+    callbacks.on_file_complete = [file_complete_cb](const std::string& filename) {
+        if (file_complete_cb)
+            file_complete_cb(filename.c_str());
+    };
+
+    g_session_thread = std::thread([s = g_session.get(), callbacks]() {
+        CORE_LOG("Session host thread started");
+        s->host(callbacks);
+        CORE_LOG("Session host thread finished");
+    });
+}
+
+void fd_session_join(const char* ip, int port, const char* pin, const char* save_dir,
+                     fd_session_established_cb established_cb, fd_session_ended_cb ended_cb,
+                     fd_session_status_cb status_cb, fd_session_error_cb error_cb,
+                     fd_session_file_offer_cb file_offer_cb, fd_session_progress_cb progress_cb,
+                     fd_session_file_complete_cb file_complete_cb) {
+
+    CORE_LOG("fd_session_join() — " << (ip ? ip : "null") << ":" << port);
+
+    // Clean up any previous session
+    fd_session_disconnect();
+
+    g_session = std::make_unique<networking::Session>();
+
+    networking::SessionCallbacks callbacks;
+    callbacks.on_session_established = [established_cb](const networking::SessionInfo& info) {
+        if (established_cb) {
+            static thread_local std::string ip_storage;
+            ip_storage = info.peer_ip;
+            fd_session_info_t c_info;
+            c_info.session_id = info.session_id;
+            c_info.peer_ip = ip_storage.c_str();
+            c_info.peer_port = info.peer_port;
+            c_info.role = (info.role == networking::SessionRole::HOST) ? 0 : 1;
+            established_cb(&c_info);
+        }
+    };
+    callbacks.on_session_ended = [ended_cb]() {
+        if (ended_cb)
+            ended_cb();
+    };
+    callbacks.on_status = [status_cb](const std::string& msg) {
+        if (status_cb)
+            status_cb(msg.c_str());
+    };
+    callbacks.on_error = [error_cb](const std::string& err) {
+        if (error_cb)
+            error_cb(err.c_str());
+    };
+    callbacks.on_file_offer = [file_offer_cb](const std::string& filename, uint64_t size) -> bool {
+        if (file_offer_cb)
+            return file_offer_cb(filename.c_str(), size);
+        return true;
+    };
+    callbacks.on_progress = [progress_cb](const std::string& file, uint64_t transferred, uint64_t total, double speed) {
+        if (progress_cb)
+            progress_cb(file.c_str(), transferred, total, speed);
+    };
+    callbacks.on_file_complete = [file_complete_cb](const std::string& filename) {
+        if (file_complete_cb)
+            file_complete_cb(filename.c_str());
+    };
+
+    std::string ip_str = ip ? ip : "";
+    std::string pin_str = pin ? pin : "";
+    std::string dir_str = save_dir ? save_dir : "";
+
+    g_session_thread = std::thread([s = g_session.get(), ip_str, port, pin_str, dir_str, callbacks]() {
+        CORE_LOG("Session join thread started — connecting to " << ip_str << ":" << port);
+        s->join(ip_str, port, pin_str, dir_str, callbacks);
+        CORE_LOG("Session join thread finished");
+    });
+}
+
+void fd_session_send_files(const char** file_paths, int num_files) {
+    CORE_LOG("fd_session_send_files() — " << num_files << " paths");
+    if (!g_session || !g_session->is_connected()) {
+        CORE_LOG("fd_session_send_files() — no active session");
+        return;
+    }
+    std::vector<std::string> paths;
+    paths.reserve(num_files);
+    for (int i = 0; i < num_files; ++i) {
+        if (file_paths[i])
+            paths.emplace_back(file_paths[i]);
+    }
+    g_session->queue_send_files(paths);
+}
+
+void fd_session_set_save_dir(const char* dir) {
+    CORE_LOG("fd_session_set_save_dir() — " << (dir ? dir : "null"));
+    if (g_session && dir) {
+        g_session->set_save_dir(dir);
+    }
+}
+
+void fd_session_disconnect() {
+    CORE_LOG("fd_session_disconnect()");
+    if (g_session) {
+        g_session->disconnect();
+    }
+    if (g_session_thread.joinable()) {
+        CORE_LOG("fd_session_disconnect() — joining thread...");
+        g_session_thread.join();
+        CORE_LOG("fd_session_disconnect() — thread joined");
+    }
+    g_session.reset();
+}
+
+int fd_session_get_pin() {
+    return g_session ? g_session->get_pin() : 0;
+}
+
+int fd_session_get_port() {
+    return g_session ? g_session->get_port() : 0;
+}
+
+const char* fd_session_get_ip() {
+    static std::string ip_storage;
+    if (g_session) {
+        ip_storage = g_session->get_ip();
+        return ip_storage.c_str();
+    }
+    return "";
+}
+
+bool fd_session_is_connected() {
+    return g_session && g_session->is_connected();
 }
 
 } // extern "C"
