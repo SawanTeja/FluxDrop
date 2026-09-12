@@ -84,4 +84,9 @@ class Client {
     bool stopped_ = false;
 };
 
+// Utility functions (defined in networking.cpp)
+std::string get_local_ip(boost::asio::io_context& io_context);
+std::string format_size(uint64_t bytes);
+std::string get_instance_id();
+
 } // namespace networking
