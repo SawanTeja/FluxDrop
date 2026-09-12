@@ -21,6 +21,7 @@ add_library(fluxdrop_core STATIC
     src/transfer.cpp
     src/packet.cpp
     src/security.cpp
+    src/session.cpp
     src/core_api.cpp
 )
 
