@@ -251,3 +251,250 @@ extern "C" JNIEXPORT void JNICALL
 Java_dev_fluxdrop_app_bridge_FluxDropCore_requestCancelClient(JNIEnv* env, jobject) {
     fd_request_cancel_client();
 }
+
+// ------ Session-based API ------
+static jobject g_session_callbacks = nullptr;
+
+extern "C" JNIEXPORT void JNICALL
+Java_dev_fluxdrop_app_bridge_FluxDropCore_sessionHost(JNIEnv* env, jobject, jobject callbackObj) {
+    if (g_session_callbacks) {
+        env->DeleteGlobalRef(g_session_callbacks);
+    }
+    g_session_callbacks = env->NewGlobalRef(callbackObj);
+
+    fd_session_host(
+        // on_ready
+        [](const char* ip, int port, int pin) {
+            JNIEnv* env = get_env();
+            if (!env || !g_session_callbacks) return;
+            jclass cls = env->GetObjectClass(g_session_callbacks);
+            jmethodID mid = env->GetMethodID(cls, "onReady", "(Ljava/lang/String;II)V");
+            jstring jip = env->NewStringUTF(ip);
+            env->CallVoidMethod(g_session_callbacks, mid, jip, port, pin);
+            env->DeleteLocalRef(jip);
+            env->DeleteLocalRef(cls);
+        },
+        // on_session_established
+        [](const fd_session_info_t* info) {
+            JNIEnv* env = get_env();
+            if (!env || !g_session_callbacks) return;
+            jclass cls = env->GetObjectClass(g_session_callbacks);
+            jmethodID mid = env->GetMethodID(cls, "onSessionEstablished", "(Ljava/lang/String;II)V");
+            jstring jip = env->NewStringUTF(info->peer_ip);
+            env->CallVoidMethod(g_session_callbacks, mid, jip, info->peer_port, info->role);
+            env->DeleteLocalRef(jip);
+            env->DeleteLocalRef(cls);
+        },
+        // on_session_ended
+        []() {
+            JNIEnv* env = get_env();
+            if (!env || !g_session_callbacks) return;
+            jclass cls = env->GetObjectClass(g_session_callbacks);
+            jmethodID mid = env->GetMethodID(cls, "onSessionEnded", "()V");
+            env->CallVoidMethod(g_session_callbacks, mid);
+            env->DeleteLocalRef(cls);
+        },
+        // on_status
+        [](const char* msg) {
+            JNIEnv* env = get_env();
+            if (!env || !g_session_callbacks) return;
+            jclass cls = env->GetObjectClass(g_session_callbacks);
+            jmethodID mid = env->GetMethodID(cls, "onStatus", "(Ljava/lang/String;)V");
+            jstring jmsg = env->NewStringUTF(msg);
+            env->CallVoidMethod(g_session_callbacks, mid, jmsg);
+            env->DeleteLocalRef(jmsg);
+            env->DeleteLocalRef(cls);
+        },
+        // on_error
+        [](const char* err) {
+            JNIEnv* env = get_env();
+            if (!env || !g_session_callbacks) return;
+            jclass cls = env->GetObjectClass(g_session_callbacks);
+            jmethodID mid = env->GetMethodID(cls, "onError", "(Ljava/lang/String;)V");
+            jstring jerr = env->NewStringUTF(err);
+            env->CallVoidMethod(g_session_callbacks, mid, jerr);
+            env->DeleteLocalRef(jerr);
+            env->DeleteLocalRef(cls);
+        },
+        // on_file_offer
+        [](const char* file, uint64_t size) -> bool {
+            JNIEnv* env = get_env();
+            if (!env || !g_session_callbacks) return true;
+            jclass cls = env->GetObjectClass(g_session_callbacks);
+            jmethodID mid = env->GetMethodID(cls, "onFileOffer", "(Ljava/lang/String;J)Z");
+            jstring jfile = env->NewStringUTF(file);
+            jboolean result = env->CallBooleanMethod(g_session_callbacks, mid, jfile, (jlong)size);
+            env->DeleteLocalRef(jfile);
+            env->DeleteLocalRef(cls);
+            return result == JNI_TRUE;
+        },
+        // on_progress
+        [](const char* file, uint64_t tx, uint64_t total, double speed) {
+            JNIEnv* env = get_env();
+            if (!env || !g_session_callbacks) return;
+            jclass cls = env->GetObjectClass(g_session_callbacks);
+            jmethodID mid = env->GetMethodID(cls, "onProgress", "(Ljava/lang/String;JJD)V");
+            jstring jfile = env->NewStringUTF(file);
+            env->CallVoidMethod(g_session_callbacks, mid, jfile, (jlong)tx, (jlong)total, (jdouble)speed);
+            env->DeleteLocalRef(jfile);
+            env->DeleteLocalRef(cls);
+        },
+        // on_file_complete
+        [](const char* file) {
+            JNIEnv* env = get_env();
+            if (!env || !g_session_callbacks) return;
+            jclass cls = env->GetObjectClass(g_session_callbacks);
+            jmethodID mid = env->GetMethodID(cls, "onFileComplete", "(Ljava/lang/String;)V");
+            jstring jfile = env->NewStringUTF(file);
+            env->CallVoidMethod(g_session_callbacks, mid, jfile);
+            env->DeleteLocalRef(jfile);
+            env->DeleteLocalRef(cls);
+        }
+    );
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_dev_fluxdrop_app_bridge_FluxDropCore_sessionJoin(
+    JNIEnv* env, jobject, jstring jip, jint port, jstring jpin, jstring jsaveDir, jobject callbackObj) {
+
+    if (g_session_callbacks) {
+        env->DeleteGlobalRef(g_session_callbacks);
+    }
+    g_session_callbacks = env->NewGlobalRef(callbackObj);
+
+    const char* ip = env->GetStringUTFChars(jip, nullptr);
+    const char* pin = env->GetStringUTFChars(jpin, nullptr);
+    const char* saveDir = env->GetStringUTFChars(jsaveDir, nullptr);
+
+    fd_session_join(ip, port, pin, saveDir,
+        // on_session_established
+        [](const fd_session_info_t* info) {
+            JNIEnv* env = get_env();
+            if (!env || !g_session_callbacks) return;
+            jclass cls = env->GetObjectClass(g_session_callbacks);
+            jmethodID mid = env->GetMethodID(cls, "onSessionEstablished", "(Ljava/lang/String;II)V");
+            jstring jip = env->NewStringUTF(info->peer_ip);
+            env->CallVoidMethod(g_session_callbacks, mid, jip, info->peer_port, info->role);
+            env->DeleteLocalRef(jip);
+            env->DeleteLocalRef(cls);
+        },
+        // on_session_ended
+        []() {
+            JNIEnv* env = get_env();
+            if (!env || !g_session_callbacks) return;
+            jclass cls = env->GetObjectClass(g_session_callbacks);
+            jmethodID mid = env->GetMethodID(cls, "onSessionEnded", "()V");
+            env->CallVoidMethod(g_session_callbacks, mid);
+            env->DeleteLocalRef(cls);
+        },
+        // on_status
+        [](const char* msg) {
+            JNIEnv* env = get_env();
+            if (!env || !g_session_callbacks) return;
+            jclass cls = env->GetObjectClass(g_session_callbacks);
+            jmethodID mid = env->GetMethodID(cls, "onStatus", "(Ljava/lang/String;)V");
+            jstring jmsg = env->NewStringUTF(msg);
+            env->CallVoidMethod(g_session_callbacks, mid, jmsg);
+            env->DeleteLocalRef(jmsg);
+            env->DeleteLocalRef(cls);
+        },
+        // on_error
+        [](const char* err) {
+            JNIEnv* env = get_env();
+            if (!env || !g_session_callbacks) return;
+            jclass cls = env->GetObjectClass(g_session_callbacks);
+            jmethodID mid = env->GetMethodID(cls, "onError", "(Ljava/lang/String;)V");
+            jstring jerr = env->NewStringUTF(err);
+            env->CallVoidMethod(g_session_callbacks, mid, jerr);
+            env->DeleteLocalRef(jerr);
+            env->DeleteLocalRef(cls);
+        },
+        // on_file_offer
+        [](const char* file, uint64_t size) -> bool {
+            JNIEnv* env = get_env();
+            if (!env || !g_session_callbacks) return true;
+            jclass cls = env->GetObjectClass(g_session_callbacks);
+            jmethodID mid = env->GetMethodID(cls, "onFileOffer", "(Ljava/lang/String;J)Z");
+            jstring jfile = env->NewStringUTF(file);
+            jboolean result = env->CallBooleanMethod(g_session_callbacks, mid, jfile, (jlong)size);
+            env->DeleteLocalRef(jfile);
+            env->DeleteLocalRef(cls);
+            return result == JNI_TRUE;
+        },
+        // on_progress
+        [](const char* file, uint64_t tx, uint64_t total, double speed) {
+            JNIEnv* env = get_env();
+            if (!env || !g_session_callbacks) return;
+            jclass cls = env->GetObjectClass(g_session_callbacks);
+            jmethodID mid = env->GetMethodID(cls, "onProgress", "(Ljava/lang/String;JJD)V");
+            jstring jfile = env->NewStringUTF(file);
+            env->CallVoidMethod(g_session_callbacks, mid, jfile, (jlong)tx, (jlong)total, (jdouble)speed);
+            env->DeleteLocalRef(jfile);
+            env->DeleteLocalRef(cls);
+        },
+        // on_file_complete
+        [](const char* file) {
+            JNIEnv* env = get_env();
+            if (!env || !g_session_callbacks) return;
+            jclass cls = env->GetObjectClass(g_session_callbacks);
+            jmethodID mid = env->GetMethodID(cls, "onFileComplete", "(Ljava/lang/String;)V");
+            jstring jfile = env->NewStringUTF(file);
+            env->CallVoidMethod(g_session_callbacks, mid, jfile);
+            env->DeleteLocalRef(jfile);
+            env->DeleteLocalRef(cls);
+        }
+    );
+
+    env->ReleaseStringUTFChars(jip, ip);
+    env->ReleaseStringUTFChars(jpin, pin);
+    env->ReleaseStringUTFChars(jsaveDir, saveDir);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_dev_fluxdrop_app_bridge_FluxDropCore_sessionSendFiles(JNIEnv* env, jobject, jobjectArray filePaths) {
+    int count = env->GetArrayLength(filePaths);
+    std::vector<std::string> paths(count);
+    std::vector<const char*> c_paths(count);
+    for (int i = 0; i < count; i++) {
+        jstring js = (jstring)env->GetObjectArrayElement(filePaths, i);
+        const char* cs = env->GetStringUTFChars(js, nullptr);
+        paths[i] = cs;
+        c_paths[i] = paths[i].c_str();
+        env->ReleaseStringUTFChars(js, cs);
+        env->DeleteLocalRef(js);
+    }
+    fd_session_send_files(c_paths.data(), count);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_dev_fluxdrop_app_bridge_FluxDropCore_sessionSetSaveDir(JNIEnv* env, jobject, jstring jdir) {
+    const char* dir = env->GetStringUTFChars(jdir, nullptr);
+    fd_session_set_save_dir(dir);
+    env->ReleaseStringUTFChars(jdir, dir);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_dev_fluxdrop_app_bridge_FluxDropCore_sessionDisconnect(JNIEnv* env, jobject) {
+    fd_session_disconnect();
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_dev_fluxdrop_app_bridge_FluxDropCore_sessionGetPin(JNIEnv* env, jobject) {
+    return fd_session_get_pin();
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_dev_fluxdrop_app_bridge_FluxDropCore_sessionGetPort(JNIEnv* env, jobject) {
+    return fd_session_get_port();
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_dev_fluxdrop_app_bridge_FluxDropCore_sessionGetIp(JNIEnv* env, jobject) {
+    const char* ip = fd_session_get_ip();
+    return env->NewStringUTF(ip);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_dev_fluxdrop_app_bridge_FluxDropCore_sessionIsConnected(JNIEnv* env, jobject) {
+    return fd_session_is_connected() ? JNI_TRUE : JNI_FALSE;
+}
