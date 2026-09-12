@@ -14,7 +14,14 @@ enum class CommandType : uint32_t {
     RESUME = 6,
     AUTH = 7,
     AUTH_OK = 8,
-    AUTH_FAIL = 9
+    AUTH_FAIL = 9,
+    SESSION_REQUEST = 10, // Reserved for future multi-guest
+    SESSION_ACCEPT = 11,  // Reserved for future multi-guest
+    SESSION_DENY = 12,    // Reserved for future multi-guest
+    FILE_OFFER = 13,      // Reserved for future batch negotiation
+    FILE_ACCEPT = 14,     // Reserved for future batch negotiation
+    FILE_REJECT = 15,     // Peer declines a file before transfer starts
+    SESSION_END = 16      // Graceful session disconnect
 };
 
 struct PacketHeader {
