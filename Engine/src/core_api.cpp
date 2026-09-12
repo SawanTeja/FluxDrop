@@ -4,7 +4,6 @@
 
 #include <atomic>
 #include <filesystem>
-#include <iostream>
 #include <memory>
 #include <queue>
 #include <string>

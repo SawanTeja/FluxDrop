@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
-#include <iostream>
 #include <thread>
 
 #include "logger.hpp"
