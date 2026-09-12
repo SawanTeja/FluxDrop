@@ -6,6 +6,11 @@
 #include <mutex>
 #include <thread>
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#define LOG_TAG "FluxDropCore"
+#endif
+
 namespace fluxdrop {
 namespace logger {
 
@@ -52,10 +57,30 @@ void log(Level level, const char* file, int line, const std::string& msg) {
 #if FD_LOGGER_ENABLED
     std::lock_guard<std::mutex> lock(g_log_mutex);
 
+#ifdef __ANDROID__
+    int android_level = ANDROID_LOG_INFO;
+    switch (level) {
+    case Level::DEBUG:
+        android_level = ANDROID_LOG_DEBUG;
+        break;
+    case Level::INFO:
+        android_level = ANDROID_LOG_INFO;
+        break;
+    case Level::WARN:
+        android_level = ANDROID_LOG_WARN;
+        break;
+    case Level::ERR:
+        android_level = ANDROID_LOG_ERROR;
+        break;
+    }
+    __android_log_print(android_level, LOG_TAG, "[%s:%d] %s", file_basename(file), line, msg.c_str());
+#else
     std::cerr << "[FD " << timestamp() << "] "
               << "[" << level_to_string(level) << "] "
               << "[" << std::this_thread::get_id() << "] "
               << "[" << file_basename(file) << ":" << line << "] " << msg << "\n";
+#endif
+
 #endif
 }
 

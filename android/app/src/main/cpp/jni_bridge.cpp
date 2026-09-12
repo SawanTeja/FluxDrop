@@ -1,12 +1,8 @@
 #include <jni.h>
-#include <android/log.h>
 #include <string>
 #include <vector>
 #include "fluxdrop_core.h"
-
-#define LOG_TAG "FluxDrop-JNI"
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#include "logger.hpp"
 
 static JavaVM* g_jvm = nullptr;
 static jobject g_server_callbacks = nullptr;
@@ -31,7 +27,7 @@ public:
             if (g_jvm->AttachCurrentThread(&env, nullptr) == 0) {
                 needs_detach = true;
             } else {
-                LOGE("Failed to attach thread");
+                FD_LOG_ERR("Failed to attach thread");
                 return nullptr;
             }
         }
