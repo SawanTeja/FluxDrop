@@ -1,12 +1,10 @@
 #pragma once
 
 #include <QMainWindow>
-#include <QTabWidget>
 
 namespace ui {
 
-class FileSenderPanel;
-class DeviceListPanel;
+class SessionPanel;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -15,9 +13,7 @@ class MainWindow : public QMainWindow {
     ~MainWindow() override;
 
   private:
-    QTabWidget* tab_widget_;
-    FileSenderPanel* send_panel_;
-    DeviceListPanel* receive_panel_;
+    SessionPanel* session_panel_;
 
     void setup_stylesheet();
 };

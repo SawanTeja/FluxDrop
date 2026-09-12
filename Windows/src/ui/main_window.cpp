@@ -1,7 +1,6 @@
 #include "ui/main_window.hpp"
 #include "logger.hpp"
-#include "ui/device_list.hpp"
-#include "ui/file_sender.hpp"
+#include "ui/session_panel.hpp"
 #include <QApplication>
 #include <QIcon>
 
@@ -242,27 +241,14 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     resize(520, 650);
     setWindowIcon(QIcon("assets/fluxdroplogo.ico"));
 
-    tab_widget_ = new QTabWidget(this);
-    tab_widget_->setDocumentMode(true);
-
-    send_panel_ = new FileSenderPanel(this);
-    receive_panel_ = new DeviceListPanel(this);
-
-    tab_widget_->addTab(send_panel_, "Send File");
-    tab_widget_->addTab(receive_panel_, "Receive");
-
-    setCentralWidget(tab_widget_);
-
-    receive_panel_->start_discovery();
+    session_panel_ = new SessionPanel(this);
+    setCentralWidget(session_panel_);
 
     FD_LOG("MainWindow created");
 }
 
 MainWindow::~MainWindow() {
     FD_LOG("~MainWindow — cleaning up");
-    if (receive_panel_) {
-        receive_panel_->stop_discovery();
-    }
     FD_LOG("~MainWindow — done");
 }
 
