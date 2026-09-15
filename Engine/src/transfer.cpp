@@ -130,6 +130,8 @@ bool MessageSender::send_file(boost::asio::ip::tcp::socket& socket, const std::s
         std::ifstream file(filepath, std::ios::binary);
         if (!file.is_open()) {
             FD_LOG_ERR("Could not open file for reading: " << filepath);
+            protocol::PacketHeader cancel_header{static_cast<uint32_t>(protocol::CommandType::CANCEL), 0, session_id, 0};
+            send_header(socket, cancel_header);
             return false;
         }
 

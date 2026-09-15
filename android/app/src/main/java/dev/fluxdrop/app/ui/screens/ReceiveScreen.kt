@@ -165,6 +165,7 @@ fun ReceiveScreen(modifier: Modifier = Modifier) {
                 selectedFilesToSend = emptyList()
                 SessionState.isSessionActive.value = false
                 SessionState.autoAcceptIncoming = false
+                SessionState.currentTransferDeferred?.complete(Unit)
             }
             override fun onStatus(message: String) { status = message }
             override fun onError(error: String) {
@@ -172,6 +173,7 @@ fun ReceiveScreen(modifier: Modifier = Modifier) {
                 sessionEstablished = false
                 selectedDevice = null
                 SessionState.isSessionActive.value = false
+                SessionState.currentTransferDeferred?.complete(Unit)
             }
             override fun onFileOffer(filename: String, fileSize: Long): Boolean {
                 if (SessionState.autoAcceptIncoming) return true
@@ -206,6 +208,7 @@ fun ReceiveScreen(modifier: Modifier = Modifier) {
             override fun onFileComplete(filename: String) {
                 status = "Completed: $filename"
                 transferState = transferState.copy(progress = 1f, status = "Done")
+                SessionState.currentTransferDeferred?.complete(Unit)
             }
         })
     }
@@ -443,22 +446,35 @@ fun ReceiveScreen(modifier: Modifier = Modifier) {
                     Button(
                         onClick = {
                             coroutineScope.launch {
-                                status = "Preparing files..."
-                                val paths = withContext(Dispatchers.IO) {
+                                val queue = selectedFilesToSend.toList()
+                                if (queue.isEmpty()) return@launch
+
+                                for ((index, uri) in queue.withIndex()) {
+                                    if (!sessionEstablished) break
+                                    status = "Sending file ${index + 1} of ${queue.size}..."
+                                    transferState = TransferState()
+
+                                    val tempPath = withContext(Dispatchers.IO) { copyToCacheReceive(context, uri) }
+                                    if (tempPath.isEmpty()) continue
+
+                                    SessionState.currentTransferDeferred = kotlinx.coroutines.CompletableDeferred()
+                                    FluxDropCore.sessionSendFiles(arrayOf(tempPath))
+
                                     try {
-                                        selectedFilesToSend.map { uri -> copyToCacheReceive(context, uri) }
+                                        SessionState.currentTransferDeferred?.await()
                                     } catch (e: Exception) {
-                                        emptyList<String>()
+                                        // Cancelled or error
+                                    }
+
+                                    withContext(Dispatchers.IO) {
+                                        File(tempPath).delete()
                                     }
                                 }
-                                if (paths.isEmpty()) {
-                                    status = "No files to send"
-                                    return@launch
+                                if (sessionEstablished) {
+                                    status = "All files sent"
+                                    transferState = TransferState()
+                                    selectedFilesToSend = emptyList()
                                 }
-                                status = "Sending ${paths.size} file(s)..."
-                                transferState = TransferState()
-                                FluxDropCore.sessionSendFiles(paths.toTypedArray())
-                                selectedFilesToSend = emptyList()
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Color.White),

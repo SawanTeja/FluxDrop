@@ -609,6 +609,8 @@ void Session::process_send_batch(boost::asio::ip::tcp::socket& socket, const std
                 job_done = true;
                 if (callbacks_.on_status)
                     callbacks_.on_status("Peer rejected: " + job.filename);
+                if (callbacks_.on_file_complete)
+                    callbacks_.on_file_complete(job.filename);
             } else if (cmd == protocol::CommandType::PING) {
                 protocol::PacketHeader pong{static_cast<uint32_t>(protocol::CommandType::PONG), 0, resp.session_id, 0};
                 transfer::MessageSender::send_header(socket, pong);
