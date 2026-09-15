@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Environment
 import android.provider.OpenableColumns
+import android.os.ParcelFileDescriptor
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -30,6 +31,8 @@ import dev.fluxdrop.app.bridge.SessionCallbacks
 import dev.fluxdrop.app.ui.components.TransferProgress
 import dev.fluxdrop.app.ui.components.TransferState
 import dev.fluxdrop.app.ui.state.SessionState
+import dev.fluxdrop.app.util.SelectedFileInfo
+import dev.fluxdrop.app.util.getFileInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -62,7 +65,7 @@ fun ReceiveScreen(modifier: Modifier = Modifier) {
     var peerInfo by remember { mutableStateOf("") }
 
     // For sending files back in session
-    var selectedFilesToSend by remember { mutableStateOf<List<Uri>>(emptyList()) }
+    var selectedFilesToSend by remember { mutableStateOf<List<SelectedFileInfo>>(emptyList()) }
 
     var manualIp by remember { mutableStateOf("") }
     var manualPort by remember { mutableStateOf("") }
@@ -71,7 +74,10 @@ fun ReceiveScreen(modifier: Modifier = Modifier) {
     // File picker for sending files back
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) {
-            selectedFilesToSend = selectedFilesToSend + uris
+            coroutineScope.launch(Dispatchers.IO) {
+                val infos = uris.map { getFileInfo(context, it) }
+                selectedFilesToSend = selectedFilesToSend + infos
+            }
         }
     }
 
@@ -424,7 +430,19 @@ fun ReceiveScreen(modifier: Modifier = Modifier) {
 
             if (selectedFilesToSend.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(8.dp))
-                Text("${selectedFilesToSend.size} file(s) selected", color = Color.LightGray)
+                LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 150.dp)) {
+                    items(selectedFilesToSend.size) { index ->
+                        val file = selectedFilesToSend[index]
+                        val sizeMb = file.size.toFloat() / (1024f * 1024f)
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("📄 ${file.name}", color = Color.White, modifier = Modifier.weight(1f))
+                            Text("${"%.1f".format(sizeMb)} MB", color = Color.LightGray, fontSize = 12.sp)
+                        }
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -449,12 +467,23 @@ fun ReceiveScreen(modifier: Modifier = Modifier) {
                                 val queue = selectedFilesToSend.toList()
                                 if (queue.isEmpty()) return@launch
 
-                                for ((index, uri) in queue.withIndex()) {
+                                for ((index, fileInfo) in queue.withIndex()) {
                                     if (!sessionEstablished) break
                                     status = "Sending file ${index + 1} of ${queue.size}..."
                                     transferState = TransferState()
 
-                                    val tempPath = withContext(Dispatchers.IO) { copyToCacheReceive(context, uri) }
+                                    var pfd: ParcelFileDescriptor? = null
+                                    var tempPath = ""
+                                    try {
+                                        pfd = context.contentResolver.openFileDescriptor(fileInfo.uri, "r")
+                                        if (pfd != null) {
+                                            tempPath = "/proc/self/fd/${pfd.fd}"
+                                        }
+                                    } catch (e: Exception) {
+                                        status = "Error reading ${fileInfo.name}"
+                                        continue
+                                    }
+
                                     if (tempPath.isEmpty()) continue
 
                                     SessionState.currentTransferDeferred = kotlinx.coroutines.CompletableDeferred()
@@ -466,9 +495,7 @@ fun ReceiveScreen(modifier: Modifier = Modifier) {
                                         // Cancelled or error
                                     }
 
-                                    withContext(Dispatchers.IO) {
-                                        File(tempPath).delete()
-                                    }
+                                    pfd?.close()
                                 }
                                 if (sessionEstablished) {
                                     status = "All files sent"
@@ -506,23 +533,4 @@ fun ReceiveScreen(modifier: Modifier = Modifier) {
             }
         }
     }
-}
-
-private fun copyToCacheReceive(context: Context, uri: Uri): String {
-    val cursor = context.contentResolver.query(uri, null, null, null, null)
-    var name = "temp_file"
-    if (cursor != null && cursor.moveToFirst()) {
-        val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-        if (nameIndex != -1) {
-            name = cursor.getString(nameIndex)
-        }
-        cursor.close()
-    }
-    val cacheFile = File(context.cacheDir, name)
-    context.contentResolver.openInputStream(uri)?.use { input ->
-        FileOutputStream(cacheFile).use { output ->
-            input.copyTo(output)
-        }
-    }
-    return cacheFile.absolutePath
 }
