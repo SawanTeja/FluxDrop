@@ -55,7 +55,7 @@ object FluxDropCore {
     // Session-based API
     external fun sessionHost(callbacks: SessionCallbacks)
     external fun sessionJoin(ip: String, port: Int, pin: String, saveDir: String, callbacks: SessionCallbacks)
-    external fun sessionSendFiles(filePaths: Array<String>)
+    external fun sessionSendFiles(filePaths: Array<String>, fileNames: Array<String>)
     external fun sessionSetSaveDir(dir: String)
     external fun sessionDisconnect()
     external fun sessionGetPin(): Int

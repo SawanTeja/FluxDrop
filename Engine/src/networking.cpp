@@ -86,11 +86,11 @@ uint64_t available_space_for_target(const fs::path& target_path) {
 
 } // namespace
 
-std::string get_local_ip(boost::asio::io_context& io_context) {
+std::vector<std::string> get_network_interfaces(boost::asio::io_context& io_context) {
+    std::vector<std::string> interfaces;
 #ifdef __ANDROID__
     struct ifaddrs *ifap, *ifa;
     struct sockaddr_in* sa;
-    std::string ip = "127.0.0.1";
     if (getifaddrs(&ifap) != -1) {
         for (ifa = ifap; ifa != nullptr; ifa = ifa->ifa_next) {
             if (ifa->ifa_addr != nullptr && ifa->ifa_addr->sa_family == AF_INET) {
@@ -98,28 +98,23 @@ std::string get_local_ip(boost::asio::io_context& io_context) {
                 char* addr = inet_ntoa(sa->sin_addr);
                 std::string s_addr(addr);
                 if (s_addr != "127.0.0.1" && std::string(ifa->ifa_name).find("dummy") == std::string::npos) {
-                    ip = s_addr;
-                    if (std::string(ifa->ifa_name).find("wlan") != std::string::npos ||
-                        std::string(ifa->ifa_name).find("ap") != std::string::npos ||
-                        std::string(ifa->ifa_name).find("swlan") != std::string::npos) {
-                        break;
-                    }
+                    interfaces.push_back(s_addr);
                 }
             }
         }
         freeifaddrs(ifap);
     }
-    if (ip != "127.0.0.1")
-        return ip;
 #endif
-
-    try {
-        boost::asio::ip::udp::socket socket(io_context);
-        socket.connect(boost::asio::ip::udp::endpoint(boost::asio::ip::make_address("8.8.8.8"), 53));
-        return socket.local_endpoint().address().to_string();
-    } catch (...) {
-        return "127.0.0.1";
+    if (interfaces.empty()) {
+        try {
+            boost::asio::ip::udp::socket socket(io_context);
+            socket.connect(boost::asio::ip::udp::endpoint(boost::asio::ip::make_address("8.8.8.8"), 53));
+            interfaces.push_back(socket.local_endpoint().address().to_string());
+        } catch (...) {
+            interfaces.push_back("127.0.0.1");
+        }
     }
+    return interfaces;
 }
 
 std::string format_size(uint64_t bytes) {
@@ -166,12 +161,37 @@ void DiscoveryListener::start(uint32_t room_id, DeviceFoundCallback callback) {
             boost::asio::ip::udp::socket socket(
                 io_context, boost::asio::ip::udp::endpoint(boost::asio::ip::udp::v4(), DISCOVERY_PORT));
             socket.set_option(boost::asio::socket_base::reuse_address(true));
-            // Join multicast group for hotspot discovery
-            socket.set_option(boost::asio::ip::multicast::join_group(boost::asio::ip::make_address(MULTICAST_GROUP)));
-
-            std::string local_ip = get_local_ip(io_context);
+            
+            auto interfaces = get_network_interfaces(io_context);
+            for (const auto& ip : interfaces) {
+                try {
+                    socket.set_option(boost::asio::ip::multicast::join_group(
+                        boost::asio::ip::make_address(MULTICAST_GROUP).to_v4(),
+                        boost::asio::ip::make_address(ip).to_v4()));
+                } catch(...) {}
+            }
 
             socket.non_blocking(true);
+
+            // Periodically send DISCOVER request
+            std::thread prober([this]() {
+                try {
+                    boost::asio::io_context probe_io;
+                    boost::asio::ip::udp::socket probe_socket(probe_io, boost::asio::ip::udp::endpoint(boost::asio::ip::udp::v4(), 0));
+                    probe_socket.set_option(boost::asio::socket_base::broadcast(true));
+                    
+                    boost::asio::ip::udp::endpoint broadcast_ep(boost::asio::ip::address_v4::broadcast(), DISCOVERY_PORT);
+                    boost::asio::ip::udp::endpoint multicast_ep(boost::asio::ip::make_address(MULTICAST_GROUP), DISCOVERY_PORT);
+                    
+                    while (running_) {
+                        std::string req = "FLUXDROP_DISCOVER";
+                        boost::system::error_code ec;
+                        probe_socket.send_to(boost::asio::buffer(req), broadcast_ep, 0, ec);
+                        probe_socket.send_to(boost::asio::buffer(req), multicast_ep, 0, ec);
+                        std::this_thread::sleep_for(std::chrono::seconds(1));
+                    }
+                } catch(...) {}
+            });
 
             while (running_) {
                 std::array<char, 1024> recv_buf;
@@ -181,19 +201,18 @@ void DiscoveryListener::start(uint32_t room_id, DeviceFoundCallback callback) {
                 size_t len = socket.receive_from(boost::asio::buffer(recv_buf), sender_endpoint, 0, ec);
 
                 if (ec == boost::asio::error::would_block) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    continue;
+                }
+                if (ec) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
                     continue;
                 }
 
-                if (ec)
-                    continue;
-
                 std::string sender_ip = sender_endpoint.address().to_string();
-                if (sender_ip == local_ip)
-                    continue;
 
                 std::string message(recv_buf.data(), len);
-                if (message.find("FLUXDROP|") == 0) {
+                if (message.find("FLUXDROP|") == 0 || message.find("FLUXDROP_RESPONSE|") == 0) {
                     size_t first_pipe = message.find('|');
                     size_t second_pipe = message.find('|', first_pipe + 1);
                     size_t third_pipe = message.find('|', second_pipe + 1);
@@ -211,8 +230,8 @@ void DiscoveryListener::start(uint32_t room_id, DeviceFoundCallback callback) {
                         }
 
                         if (instance_id == get_instance_id())
-                            continue;
-                        if (device.session_id != room_id)
+                            continue; // self
+                        if (device.session_id != room_id && room_id != 0)
                             continue;
 
                         device.ip = sender_ip;
@@ -220,6 +239,9 @@ void DiscoveryListener::start(uint32_t room_id, DeviceFoundCallback callback) {
                             callback(device);
                     }
                 }
+            }
+            if (prober.joinable()) {
+                prober.join();
             }
         } catch (std::exception& e) {
             FD_LOG_ERR("DiscoveryListener Exception: " << e.what());
@@ -249,7 +271,8 @@ void Server::start_gui(std::queue<TransferJob> jobs, ServerCallbacks callbacks) 
         boost::asio::io_context io_context;
         tcp::acceptor acceptor(io_context, tcp::endpoint(tcp::v4(), 0));
 
-        std::string ip = get_local_ip(io_context);
+        auto interfaces = get_network_interfaces(io_context);
+        std::string ip = interfaces.empty() ? "127.0.0.1" : interfaces.front();
         unsigned short port = acceptor.local_endpoint().port();
 
         uint16_t pin = security::generate_pin();

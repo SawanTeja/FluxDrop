@@ -447,19 +447,30 @@ Java_dev_fluxdrop_app_bridge_FluxDropCore_sessionJoin(
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_dev_fluxdrop_app_bridge_FluxDropCore_sessionSendFiles(JNIEnv* env, jobject, jobjectArray filePaths) {
+Java_dev_fluxdrop_app_bridge_FluxDropCore_sessionSendFiles(JNIEnv* env, jobject, jobjectArray filePaths, jobjectArray fileNames) {
     int count = env->GetArrayLength(filePaths);
+    int names_count = env->GetArrayLength(fileNames);
+    if (count != names_count) return;
+
     std::vector<std::string> paths(count);
+    std::vector<std::string> names(count);
     std::vector<const char*> c_paths(count);
+    std::vector<const char*> c_names(count);
     for (int i = 0; i < count; i++) {
-        jstring js = (jstring)env->GetObjectArrayElement(filePaths, i);
-        const char* cs = env->GetStringUTFChars(js, nullptr);
-        paths[i] = cs;
+        jstring jp = (jstring)env->GetObjectArrayElement(filePaths, i);
+        jstring jn = (jstring)env->GetObjectArrayElement(fileNames, i);
+        const char* cp = env->GetStringUTFChars(jp, nullptr);
+        const char* cn = env->GetStringUTFChars(jn, nullptr);
+        paths[i] = cp;
+        names[i] = cn;
         c_paths[i] = paths[i].c_str();
-        env->ReleaseStringUTFChars(js, cs);
-        env->DeleteLocalRef(js);
+        c_names[i] = names[i].c_str();
+        env->ReleaseStringUTFChars(jp, cp);
+        env->ReleaseStringUTFChars(jn, cn);
+        env->DeleteLocalRef(jp);
+        env->DeleteLocalRef(jn);
     }
-    fd_session_send_files(c_paths.data(), count);
+    fd_session_send_files_with_names(c_paths.data(), c_names.data(), count);
 }
 
 extern "C" JNIEXPORT void JNICALL

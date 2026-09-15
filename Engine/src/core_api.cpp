@@ -414,6 +414,21 @@ void fd_session_send_files(const char** file_paths, int num_files) {
     g_session->queue_send_files(paths);
 }
 
+void fd_session_send_files_with_names(const char** file_paths, const char** file_names, int num_files) {
+    CORE_LOG("fd_session_send_files_with_names() — " << num_files << " paths");
+    if (!g_session || !g_session->is_connected()) {
+        CORE_LOG("fd_session_send_files_with_names() — no active session");
+        return;
+    }
+    std::vector<std::pair<std::string, std::string>> files;
+    files.reserve(num_files);
+    for (int i = 0; i < num_files; ++i) {
+        if (file_paths[i] && file_names[i])
+            files.emplace_back(file_paths[i], file_names[i]);
+    }
+    g_session->queue_send_files_with_names(files);
+}
+
 void fd_session_set_save_dir(const char* dir) {
     CORE_LOG("fd_session_set_save_dir() — " << (dir ? dir : "null"));
     if (dir) {

@@ -15,9 +15,9 @@ enum class TransferState { COMPLETED, CANCELLED, FAILED };
 
 class MessageSender {
   public:
-    static void send(boost::asio::ip::tcp::socket& socket, const std::string& message);
-    static void send_header(boost::asio::ip::tcp::socket& socket, const protocol::PacketHeader& header);
-    static void send_file_meta(boost::asio::ip::tcp::socket& socket, const protocol::FileInfo& info,
+    static bool send(boost::asio::ip::tcp::socket& socket, const std::string& message);
+    static bool send_header(boost::asio::ip::tcp::socket& socket, const protocol::PacketHeader& header);
+    static bool send_file_meta(boost::asio::ip::tcp::socket& socket, const protocol::FileInfo& info,
                                uint32_t session_id = 0);
     static bool send_file(boost::asio::ip::tcp::socket& socket, const std::string& filepath, uint32_t session_id,
                           uint64_t start_offset = 0, TransferProgressCallback progress_cb = nullptr,

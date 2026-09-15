@@ -80,6 +80,7 @@ void fd_session_join(const char* ip, int port, const char* pin, const char* save
                      fd_session_file_complete_cb file_complete_cb);
 
 void fd_session_send_files(const char** file_paths, int num_files);
+void fd_session_send_files_with_names(const char** file_paths, const char** file_names, int num_files);
 
 void fd_session_set_save_dir(const char* dir);
 

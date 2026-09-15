@@ -68,6 +68,7 @@ class Session {
     // Thread-safe. Enqueues files to be sent to the peer.
     // The message loop picks them up and sends them.
     void queue_send_files(const std::vector<std::string>& file_paths);
+    void queue_send_files_with_names(const std::vector<std::pair<std::string, std::string>>& files);
 
     // Thread-safe. Set the directory where received files are saved.
     void set_save_dir(const std::string& dir);
@@ -96,6 +97,7 @@ class Session {
     // Sends a batch of files to the peer. Expands directories, sends
     // FILE_META for each file, waits for PONG/RESUME/FILE_REJECT, sends chunks.
     void process_send_batch(boost::asio::ip::tcp::socket& socket, const std::vector<std::string>& file_paths);
+    void process_send_batch_with_names(boost::asio::ip::tcp::socket& socket, const std::vector<std::pair<std::string, std::string>>& files);
 
     std::atomic<bool> connected_{false};
     std::atomic<bool> stop_flag_{false};
@@ -116,6 +118,7 @@ class Session {
     // Send queue — UI thread pushes, message loop thread pops
     std::mutex send_mtx_;
     std::queue<std::vector<std::string>> send_queue_;
+    std::queue<std::vector<std::pair<std::string, std::string>>> send_queue_with_names_;
 };
 
 } // namespace networking

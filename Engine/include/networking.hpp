@@ -8,11 +8,14 @@
 #include <queue>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace networking {
 
-constexpr const char* MULTICAST_GROUP = "239.255.45.45";
+constexpr const char* MULTICAST_GROUP = "224.0.0.167";
 constexpr unsigned short DISCOVERY_PORT = 45454;
+
+std::vector<std::string> get_network_interfaces(boost::asio::io_context& io_context);
 
 struct TransferJob {
     std::string filepath;
@@ -85,7 +88,7 @@ class Client {
 };
 
 // Utility functions (defined in networking.cpp)
-std::string get_local_ip(boost::asio::io_context& io_context);
+std::vector<std::string> get_network_interfaces(boost::asio::io_context& io_context);
 std::string format_size(uint64_t bytes);
 std::string get_instance_id();
 

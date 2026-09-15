@@ -9,6 +9,11 @@
 #include <filesystem>
 #include <thread>
 
+#if defined(__linux__) || defined(__ANDROID__)
+#include <netinet/tcp.h>
+#include <sys/socket.h>
+#endif
+
 #include "logger.hpp"
 
 namespace networking {
@@ -107,7 +112,8 @@ void Session::host(SessionCallbacks callbacks) {
         boost::asio::ip::tcp::acceptor acceptor(io_context,
                                                 boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 0));
 
-        ip_ = get_local_ip(io_context);
+        auto interfaces = get_network_interfaces(io_context);
+        ip_ = interfaces.empty() ? "0.0.0.0" : interfaces.front();
         port_ = acceptor.local_endpoint().port();
 
         pin_ = security::generate_pin();
@@ -125,20 +131,71 @@ void Session::host(SessionCallbacks callbacks) {
             try {
                 boost::asio::io_context udp_io;
                 boost::asio::ip::udp::socket udp_socket(
-                    udp_io, boost::asio::ip::udp::endpoint(boost::asio::ip::udp::v4(), 0));
+                    udp_io, boost::asio::ip::udp::endpoint(boost::asio::ip::udp::v4(), DISCOVERY_PORT));
+                udp_socket.set_option(boost::asio::socket_base::reuse_address(true));
                 udp_socket.set_option(boost::asio::socket_base::broadcast(true));
-                boost::asio::ip::udp::endpoint broadcast_ep(boost::asio::ip::address_v4::broadcast(), DISCOVERY_PORT);
-                boost::asio::ip::udp::endpoint multicast_ep(boost::asio::ip::make_address(MULTICAST_GROUP),
-                                                            DISCOVERY_PORT);
+
+                auto interfaces = get_network_interfaces(udp_io);
+                for (const auto& ip : interfaces) {
+                    try {
+                        udp_socket.set_option(boost::asio::ip::multicast::join_group(
+                            boost::asio::ip::make_address(MULTICAST_GROUP).to_v4(),
+                            boost::asio::ip::make_address(ip).to_v4()));
+                    } catch(...) {}
+                }
+
+                udp_socket.non_blocking(true);
+
+                // Thread to periodically broadcast RESPONSE
+                std::thread prober([this, &broadcasting]() {
+                    try {
+                        boost::asio::io_context probe_io;
+                        boost::asio::ip::udp::socket probe_socket(probe_io, boost::asio::ip::udp::endpoint(boost::asio::ip::udp::v4(), 0));
+                        probe_socket.set_option(boost::asio::socket_base::broadcast(true));
+
+                        boost::asio::ip::udp::endpoint broadcast_ep(boost::asio::ip::address_v4::broadcast(), DISCOVERY_PORT);
+                        boost::asio::ip::udp::endpoint multicast_ep(boost::asio::ip::make_address(MULTICAST_GROUP), DISCOVERY_PORT);
+                        
+                        while (broadcasting) {
+                            std::string msg = "FLUXDROP_RESPONSE|" + std::to_string(info_.session_id) + "|" + std::to_string(port_) +
+                                              "|" + get_instance_id();
+                            boost::system::error_code ec;
+                            probe_socket.send_to(boost::asio::buffer(msg), broadcast_ep, 0, ec);
+                            probe_socket.send_to(boost::asio::buffer(msg), multicast_ep, 0, ec);
+                            std::this_thread::sleep_for(std::chrono::seconds(1));
+                        }
+                    } catch(...) {}
+                });
 
                 while (broadcasting) {
-                    std::string msg = "FLUXDROP|" + std::to_string(info_.session_id) + "|" + std::to_string(port_) +
-                                      "|" + get_instance_id();
-                    udp_socket.send_to(boost::asio::buffer(msg), broadcast_ep);
-                    udp_socket.send_to(boost::asio::buffer(msg), multicast_ep);
-                    std::this_thread::sleep_for(std::chrono::seconds(1));
+                    std::array<char, 1024> recv_buf;
+                    boost::asio::ip::udp::endpoint sender_endpoint;
+                    boost::system::error_code ec;
+
+                    size_t len = udp_socket.receive_from(boost::asio::buffer(recv_buf), sender_endpoint, 0, ec);
+
+                    if (ec == boost::asio::error::would_block) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                        continue;
+                    }
+                    if (ec) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                        continue;
+                    }
+
+                    std::string message(recv_buf.data(), len);
+                    if (message == "FLUXDROP_DISCOVER") {
+                        std::string resp = "FLUXDROP_RESPONSE|" + std::to_string(info_.session_id) + "|" + std::to_string(port_) + "|" + get_instance_id();
+                        boost::system::error_code send_ec;
+                        udp_socket.send_to(boost::asio::buffer(resp), sender_endpoint, 0, send_ec);
+                    }
                 }
-            } catch (...) {
+                
+                if (prober.joinable()) {
+                    prober.join();
+                }
+            } catch (std::exception& e) {
+                CORE_LOG("Broadcast thread exception: " << e.what());
             }
         });
 
@@ -365,19 +422,55 @@ void Session::run_message_loop(boost::asio::ip::tcp::socket& socket) {
         callbacks_.on_session_established(info_);
 
     CORE_LOG("Session message loop started");
+    FD_LOG_INFO("[DIAG] run_message_loop() — peer=" << info_.peer_ip << ":" << info_.peer_port
+                << " session_id=" << info_.session_id
+                << " role=" << (info_.role == SessionRole::HOST ? "HOST" : "GUEST")
+                << " socket.is_open=" << socket.is_open());
+
+    // Enable TCP keepalive and TCP_NODELAY on the socket
+    try {
+        boost::asio::socket_base::keep_alive keep_alive_opt(true);
+        socket.set_option(keep_alive_opt);
+        boost::asio::ip::tcp::no_delay no_delay_opt(true);
+        socket.set_option(no_delay_opt);
+#if defined(__linux__) || defined(__ANDROID__)
+        int fd = socket.native_handle();
+        int idle = 2;
+        int interval = 1;
+        int count = 3;
+        setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof(idle));
+        setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &interval, sizeof(interval));
+        setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &count, sizeof(count));
+#endif
+        FD_LOG_INFO("[DIAG] TCP keepalive (aggressive) + TCP_NODELAY enabled on session socket");
+    } catch (const std::exception& e) {
+        FD_LOG_WARN("[DIAG] Failed to set TCP keepalive: " << e.what());
+    }
+
+    auto last_ping_time = std::chrono::steady_clock::now();
 
     while (!stop_flag_) {
         // 1. Check send queue
-        std::vector<std::string> files_to_send;
+        std::vector<std::string> pending_files;
+        std::vector<std::pair<std::string, std::string>> pending_files_with_names;
         {
             std::lock_guard<std::mutex> lock(send_mtx_);
             if (!send_queue_.empty()) {
-                files_to_send = std::move(send_queue_.front());
+                pending_files = std::move(send_queue_.front());
                 send_queue_.pop();
+            } else if (!send_queue_with_names_.empty()) {
+                pending_files_with_names = std::move(send_queue_with_names_.front());
+                send_queue_with_names_.pop();
             }
         }
-        if (!files_to_send.empty()) {
-            process_send_batch(socket, files_to_send);
+
+        if (!pending_files.empty()) {
+            FD_LOG_INFO("[DIAG] run_message_loop() — dequeued send batch: " << pending_files.size() << " file(s)");
+            process_send_batch(socket, pending_files);
+            continue;
+        } else if (!pending_files_with_names.empty()) {
+            FD_LOG_INFO("[DIAG] run_message_loop() — dequeued named send batch: " << pending_files_with_names.size() << " file(s)");
+            process_send_batch_with_names(socket, pending_files_with_names);
             continue;
         }
 
@@ -386,6 +479,9 @@ void Session::run_message_loop(boost::asio::ip::tcp::socket& socket) {
         size_t available = socket.available(ec);
 
         if (ec) {
+            FD_LOG_ERR("[DIAG] run_message_loop() — socket.available() error: " << ec.message()
+                       << " code=" << ec.value()
+                       << " socket.is_open=" << socket.is_open());
             CORE_LOG("Session message loop — socket error: " << ec.message());
             if (callbacks_.on_status)
                 callbacks_.on_status("Connection lost.");
@@ -411,6 +507,8 @@ void Session::run_message_loop(boost::asio::ip::tcp::socket& socket) {
                 protocol::PacketHeader pong{static_cast<uint32_t>(protocol::CommandType::PONG), 0, header.session_id,
                                             0};
                 transfer::MessageSender::send_header(socket, pong);
+            } else if (cmd == protocol::CommandType::PONG) {
+                FD_LOG_DEBUG("[DIAG] run_message_loop() — received keepalive PONG");
             } else if (cmd == protocol::CommandType::SESSION_END) {
                 CORE_LOG("Session message loop — peer sent SESSION_END");
                 if (callbacks_.on_status)
@@ -418,6 +516,19 @@ void Session::run_message_loop(boost::asio::ip::tcp::socket& socket) {
                 break;
             }
         } else {
+            // Idle — send keepalive PING every 5 seconds to prevent connection timeout
+            auto now = std::chrono::steady_clock::now();
+            auto since_last_ping = std::chrono::duration_cast<std::chrono::seconds>(now - last_ping_time).count();
+            if (since_last_ping >= 5) {
+                protocol::PacketHeader ping{static_cast<uint32_t>(protocol::CommandType::PING), 0, info_.session_id, 0};
+                if (!transfer::MessageSender::send_header(socket, ping)) {
+                    FD_LOG_ERR("[DIAG] run_message_loop() — keepalive PING failed, connection is dead");
+                    if (callbacks_.on_status)
+                        callbacks_.on_status("Connection lost.");
+                    break;
+                }
+                last_ping_time = now;
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
     }
@@ -425,6 +536,8 @@ void Session::run_message_loop(boost::asio::ip::tcp::socket& socket) {
     // Graceful exit — socket will be closed by disconnect() or stop()
 
     CORE_LOG("Session message loop ended");
+    FD_LOG_INFO("[DIAG] run_message_loop() — exited. stop_flag=" << stop_flag_.load()
+                << " socket.is_open=" << socket.is_open());
     connected_ = false;
 
     if (callbacks_.on_session_ended)
@@ -444,7 +557,9 @@ void Session::handle_incoming_file(boost::asio::ip::tcp::socket& socket, const p
             callbacks_.on_error(ex.what());
         protocol::PacketHeader reject{static_cast<uint32_t>(protocol::CommandType::FILE_REJECT), 0, header.session_id,
                                       0};
-        transfer::MessageSender::send_header(socket, reject);
+        if (!transfer::MessageSender::send_header(socket, reject)) {
+            return;
+        }
         return;
     }
 
@@ -463,7 +578,9 @@ void Session::handle_incoming_file(boost::asio::ip::tcp::socket& socket, const p
                                 format_size(avail) + " available.");
         protocol::PacketHeader reject{static_cast<uint32_t>(protocol::CommandType::FILE_REJECT), 0, header.session_id,
                                       0};
-        transfer::MessageSender::send_header(socket, reject);
+        if (!transfer::MessageSender::send_header(socket, reject)) {
+            return;
+        }
         return;
     }
 
@@ -476,17 +593,36 @@ void Session::handle_incoming_file(boost::asio::ip::tcp::socket& socket, const p
     if (!accepted) {
         protocol::PacketHeader reject{static_cast<uint32_t>(protocol::CommandType::FILE_REJECT), 0, header.session_id,
                                       0};
-        transfer::MessageSender::send_header(socket, reject);
+        if (!transfer::MessageSender::send_header(socket, reject)) {
+            return;
+        }
         if (callbacks_.on_status)
             callbacks_.on_status("Rejected: " + relative_path.generic_string());
         return;
     }
 
-    // Check for resume (.fluxpart file)
-    uint64_t resume_offset = 0;
+    // Check for name collision (if the file exists but no .fluxpart exists, it's a completed file we shouldn't overwrite)
+    std::error_code ec;
     std::string save_path_string = save_path.string();
     std::string part_file = save_path_string + ".fluxpart";
-    std::error_code ec;
+    
+    if (fs::exists(save_path, ec) && !fs::exists(part_file, ec)) {
+        int counter = 1;
+        fs::path stem = relative_path.stem();
+        fs::path ext = relative_path.extension();
+        fs::path parent = relative_path.parent_path();
+        
+        while (fs::exists(save_path, ec) && !fs::exists(save_path.string() + ".fluxpart", ec)) {
+            fs::path new_name = stem.string() + " (" + std::to_string(counter) + ")" + ext.string();
+            save_path = (base_dir / parent / new_name).lexically_normal();
+            counter++;
+        }
+        save_path_string = save_path.string();
+        part_file = save_path_string + ".fluxpart";
+    }
+
+    // Check for resume (.fluxpart file)
+    uint64_t resume_offset = 0;
     auto part_size = fs::file_size(part_file, ec);
     if (!ec) {
         resume_offset = part_size;
@@ -496,10 +632,18 @@ void Session::handle_incoming_file(boost::asio::ip::tcp::socket& socket, const p
 
     if (resume_offset > 0) {
         auto resume_hdr = make_resume_header(header.session_id, resume_offset);
-        transfer::MessageSender::send_header(socket, resume_hdr);
+        if (!transfer::MessageSender::send_header(socket, resume_hdr)) {
+            if (callbacks_.on_error)
+                callbacks_.on_error("Connection lost while accepting file.");
+            return;
+        }
     } else {
         protocol::PacketHeader accept{static_cast<uint32_t>(protocol::CommandType::PONG), 0, header.session_id, 0};
-        transfer::MessageSender::send_header(socket, accept);
+        if (!transfer::MessageSender::send_header(socket, accept)) {
+            if (callbacks_.on_error)
+                callbacks_.on_error("Connection lost while accepting file.");
+            return;
+        }
     }
 
     auto state = transfer::MessageReceiver::receive_file(socket, save_path_string, meta.size, resume_offset,
@@ -573,7 +717,12 @@ void Session::process_send_batch(boost::asio::ip::tcp::socket& socket, const std
         protocol::FileInfo file_info{job.filename, fsize, "application/octet-stream"};
         if (callbacks_.on_status)
             callbacks_.on_status("Sending: " + file_info.filename);
-        transfer::MessageSender::send_file_meta(socket, file_info, job.session_id);
+        if (!transfer::MessageSender::send_file_meta(socket, file_info, job.session_id)) {
+            if (callbacks_.on_error)
+                callbacks_.on_error("Connection lost while sending file metadata.");
+            stop_flag_ = true;
+            break;
+        }
 
         // Wait for peer response
         bool job_done = false;
@@ -591,16 +740,141 @@ void Session::process_send_batch(boost::asio::ip::tcp::socket& socket, const std
             auto cmd = static_cast<protocol::CommandType>(resp.command);
 
             if (cmd == protocol::CommandType::PONG) {
-                transfer::MessageSender::send_file(socket, job.filepath, resp.session_id, 0, callbacks_.on_progress,
-                                                   &stop_flag_);
+                if (!transfer::MessageSender::send_file(socket, job.filepath, resp.session_id, 0, callbacks_.on_progress,
+                                                   &stop_flag_)) {
+                    if (callbacks_.on_error)
+                        callbacks_.on_error("Connection lost while sending: " + job.filename);
+                    stop_flag_ = true;
+                    job_done = true;
+                    break;
+                }
                 job_done = true;
                 CORE_LOG("Session — sent: " << job.filename);
                 if (callbacks_.on_file_complete)
                     callbacks_.on_file_complete(job.filename);
             } else if (cmd == protocol::CommandType::RESUME) {
                 uint64_t offset = decode_resume_offset(resp);
-                transfer::MessageSender::send_file(socket, job.filepath, resp.session_id, offset, callbacks_.on_progress,
-                                                   &stop_flag_);
+                if (!transfer::MessageSender::send_file(socket, job.filepath, resp.session_id, offset, callbacks_.on_progress,
+                                                   &stop_flag_)) {
+                    if (callbacks_.on_error)
+                        callbacks_.on_error("Connection lost while sending: " + job.filename);
+                    stop_flag_ = true;
+                    job_done = true;
+                    break;
+                }
+                job_done = true;
+                CORE_LOG("Session — sent (resumed): " << job.filename);
+                if (callbacks_.on_file_complete)
+                    callbacks_.on_file_complete(job.filename);
+            } else if (cmd == protocol::CommandType::CANCEL || cmd == protocol::CommandType::FILE_REJECT) {
+                job_done = true;
+                if (callbacks_.on_status)
+                    callbacks_.on_status("Peer rejected: " + job.filename);
+                if (callbacks_.on_file_complete)
+                    callbacks_.on_file_complete(job.filename);
+            } else if (cmd == protocol::CommandType::PING) {
+                protocol::PacketHeader pong{static_cast<uint32_t>(protocol::CommandType::PONG), 0, resp.session_id, 0};
+                transfer::MessageSender::send_header(socket, pong);
+            }
+        }
+    }
+
+    if (!stop_flag_ && callbacks_.on_status)
+        callbacks_.on_status("All files sent.");
+
+    sending_ = false;
+}
+
+void Session::process_send_batch_with_names(boost::asio::ip::tcp::socket& socket,
+                                            const std::vector<std::pair<std::string, std::string>>& files) {
+    sending_ = true;
+
+    std::queue<networking::TransferJob> jobs;
+    for (const auto& file : files) {
+        fs::path path(file.first);
+        if (fs::is_regular_file(path) || path.string().find("/proc/self/fd/") == 0) {
+            jobs.push({path.string(), file.second, info_.session_id});
+        }
+    }
+
+    if (jobs.empty()) {
+        if (callbacks_.on_error)
+            callbacks_.on_error("No valid files found to send.");
+        sending_ = false;
+        return;
+    }
+
+    CORE_LOG("Session — sending " << jobs.size() << " file(s) with explicit names");
+    FD_LOG_INFO("[DIAG] process_send_batch_with_names() — " << jobs.size() << " jobs"
+                << " socket.is_open=" << socket.is_open()
+                << " stop_flag=" << stop_flag_.load());
+    if (callbacks_.on_status)
+        callbacks_.on_status("Sending " + std::to_string(jobs.size()) + " file(s)...");
+
+    while (!jobs.empty() && !stop_flag_) {
+        auto job = jobs.front();
+        jobs.pop();
+
+        std::error_code ec;
+        auto fsize = fs::file_size(job.filepath, ec);
+        if (ec) {
+            FD_LOG_WARN("[DIAG] process_send_batch_with_names() — skipping file, file_size error: "
+                        << job.filepath << " — " << ec.message());
+            continue;
+        }
+
+        FD_LOG_INFO("[DIAG] process_send_batch_with_names() — sending file=\"" << job.filename
+                    << "\" path=" << job.filepath
+                    << " size=" << fsize
+                    << " socket.is_open=" << socket.is_open());
+
+        protocol::FileInfo file_info{job.filename, fsize, "application/octet-stream"};
+        if (callbacks_.on_status)
+            callbacks_.on_status("Sending: " + file_info.filename);
+        if (!transfer::MessageSender::send_file_meta(socket, file_info, job.session_id)) {
+            if (callbacks_.on_error)
+                callbacks_.on_error("Connection lost while sending file metadata.");
+            stop_flag_ = true;
+            break;
+        }
+
+        // Wait for peer response
+        bool job_done = false;
+        while (!job_done && !stop_flag_) {
+            auto resp = transfer::MessageReceiver::receive_header(socket);
+
+            if (resp.command == 0 && resp.payload_size == 0 && resp.session_id == 0 && resp.reserved == 0) {
+                if (callbacks_.on_error)
+                    callbacks_.on_error("Peer disconnected during send.");
+                stop_flag_ = true;
+                break;
+            }
+
+            auto cmd = static_cast<protocol::CommandType>(resp.command);
+
+            if (cmd == protocol::CommandType::PONG) {
+                if (!transfer::MessageSender::send_file(socket, job.filepath, resp.session_id, 0, callbacks_.on_progress,
+                                                   &stop_flag_)) {
+                    if (callbacks_.on_error)
+                        callbacks_.on_error("Connection lost while sending: " + job.filename);
+                    stop_flag_ = true;
+                    job_done = true;
+                    break;
+                }
+                job_done = true;
+                CORE_LOG("Session — sent: " << job.filename);
+                if (callbacks_.on_file_complete)
+                    callbacks_.on_file_complete(job.filename);
+            } else if (cmd == protocol::CommandType::RESUME) {
+                uint64_t offset = decode_resume_offset(resp);
+                if (!transfer::MessageSender::send_file(socket, job.filepath, resp.session_id, offset, callbacks_.on_progress,
+                                                   &stop_flag_)) {
+                    if (callbacks_.on_error)
+                        callbacks_.on_error("Connection lost while sending: " + job.filename);
+                    stop_flag_ = true;
+                    job_done = true;
+                    break;
+                }
                 job_done = true;
                 CORE_LOG("Session — sent (resumed): " << job.filename);
                 if (callbacks_.on_file_complete)
@@ -630,6 +904,12 @@ void Session::queue_send_files(const std::vector<std::string>& file_paths) {
     std::lock_guard<std::mutex> lock(send_mtx_);
     send_queue_.push(file_paths);
     CORE_LOG("Session::queue_send_files() — " << file_paths.size() << " path(s) queued");
+}
+
+void Session::queue_send_files_with_names(const std::vector<std::pair<std::string, std::string>>& files) {
+    std::lock_guard<std::mutex> lock(send_mtx_);
+    send_queue_with_names_.push(files);
+    CORE_LOG("Session::queue_send_files_with_names() — " << files.size() << " path(s) queued");
 }
 
 void Session::set_save_dir(const std::string& dir) {

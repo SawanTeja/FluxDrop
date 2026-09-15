@@ -28,6 +28,8 @@ import dev.fluxdrop.app.ui.components.TransferState
 import dev.fluxdrop.app.ui.state.SessionState
 import dev.fluxdrop.app.util.SelectedFileInfo
 import dev.fluxdrop.app.util.getFileInfo
+import dev.fluxdrop.app.service.TransferService
+import android.net.wifi.WifiManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -53,6 +55,7 @@ fun SendScreen(modifier: Modifier = Modifier) {
     var isHosting by remember { mutableStateOf(false) }
     var sessionEstablished by remember { mutableStateOf(false) }
     var peerInfo by remember { mutableStateOf("") }
+    var multicastLock by remember { mutableStateOf<WifiManager.MulticastLock?>(null) }
     var incomingOffer by remember { mutableStateOf<IncomingFileOffer?>(null) }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -64,9 +67,31 @@ fun SendScreen(modifier: Modifier = Modifier) {
         }
     }
 
+    LaunchedEffect(isHosting) {
+        if (isHosting) {
+            if (multicastLock == null) {
+                val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+                multicastLock = wifi.createMulticastLock("FluxDropHostDiscovery")
+                multicastLock?.setReferenceCounted(false)
+            }
+            if (multicastLock?.isHeld == false) {
+                multicastLock?.acquire()
+            }
+        } else {
+            if (multicastLock?.isHeld == true) {
+                multicastLock?.release()
+            }
+        }
+    }
+
     DisposableEffect(Unit) {
         onDispose {
+            TransferService.stop(context)
+            if (multicastLock?.isHeld == true) {
+                multicastLock?.release()
+            }
             FluxDropCore.sessionDisconnect()
+            SessionState.isSessionActive.value = false
         }
     }
 
@@ -117,6 +142,7 @@ fun SendScreen(modifier: Modifier = Modifier) {
                         isHosting = true
                         status = "Starting session..."
                         SessionState.isSessionActive.value = true
+                        TransferService.start(context, "FluxDrop", "Hosting session...")
                         val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(
                             android.os.Environment.DIRECTORY_DOWNLOADS
                         ).absolutePath
@@ -130,8 +156,10 @@ fun SendScreen(modifier: Modifier = Modifier) {
                                 sessionEstablished = true
                                 peerInfo = peerIp
                                 status = "Session active"
+                                TransferService.start(context, "FluxDrop", "Connected to $peerIp")
                             }
                             override fun onSessionEnded() {
+                                TransferService.stop(context)
                                 sessionEstablished = false
                                 isHosting = false
                                 SessionState.isSessionActive.value = false
@@ -144,6 +172,7 @@ fun SendScreen(modifier: Modifier = Modifier) {
                             }
                             override fun onStatus(message: String) { status = message }
                             override fun onError(error: String) {
+                                TransferService.stop(context)
                                 status = "Error: $error"
                                 isHosting = false
                                 SessionState.isSessionActive.value = false
@@ -203,6 +232,7 @@ fun SendScreen(modifier: Modifier = Modifier) {
 
                 Button(
                     onClick = {
+                        TransferService.stop(context)
                         FluxDropCore.sessionDisconnect()
                         isHosting = false
                         SessionState.isSessionActive.value = false
@@ -305,7 +335,7 @@ fun SendScreen(modifier: Modifier = Modifier) {
                                 if (tempPath.isEmpty()) continue
 
                                 SessionState.currentTransferDeferred = kotlinx.coroutines.CompletableDeferred()
-                                FluxDropCore.sessionSendFiles(arrayOf(tempPath))
+                                FluxDropCore.sessionSendFiles(arrayOf(tempPath), arrayOf(fileInfo.name))
 
                                 try {
                                     SessionState.currentTransferDeferred?.await()
@@ -336,6 +366,7 @@ fun SendScreen(modifier: Modifier = Modifier) {
 
                 Button(
                     onClick = {
+                        TransferService.stop(context)
                         FluxDropCore.sessionDisconnect()
                         sessionEstablished = false
                         isHosting = false

@@ -33,6 +33,8 @@ import dev.fluxdrop.app.ui.components.TransferState
 import dev.fluxdrop.app.ui.state.SessionState
 import dev.fluxdrop.app.util.SelectedFileInfo
 import dev.fluxdrop.app.util.getFileInfo
+import dev.fluxdrop.app.service.TransferService
+import android.net.wifi.WifiManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -101,10 +103,22 @@ fun ReceiveScreen(modifier: Modifier = Modifier) {
     }
 
     // Discovery management
+    var multicastLock by remember { mutableStateOf<WifiManager.MulticastLock?>(null) }
+    
     LaunchedEffect(selectedDevice, sessionEstablished) {
         if (!sessionEstablished && selectedDevice == null) {
             FluxDropCore.stopDiscovery()
             devices = emptyList()
+            
+            if (multicastLock == null) {
+                val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+                multicastLock = wifi.createMulticastLock("FluxDropDiscovery")
+                multicastLock?.setReferenceCounted(false)
+            }
+            if (multicastLock?.isHeld == false) {
+                multicastLock?.acquire()
+            }
+
             FluxDropCore.startDiscovery(482913, object : DeviceFoundCallback {
                 override fun onDeviceFound(ip: String, port: Int, sessionId: Long) {
                     val newDevice = DiscoveredDevice(ip, port, sessionId)
@@ -113,11 +127,19 @@ fun ReceiveScreen(modifier: Modifier = Modifier) {
                     }
                 }
             })
+        } else {
+            if (multicastLock?.isHeld == true) {
+                multicastLock?.release()
+            }
         }
     }
 
     DisposableEffect(Unit) {
         onDispose {
+            TransferService.stop(context)
+            if (multicastLock?.isHeld == true) {
+                multicastLock?.release()
+            }
             FluxDropCore.stopDiscovery()
             FluxDropCore.sessionDisconnect()
         }
@@ -153,6 +175,7 @@ fun ReceiveScreen(modifier: Modifier = Modifier) {
         File(saveDir).mkdirs()
         status = "Connecting..."
         SessionState.isSessionActive.value = true
+        TransferService.start(context, "FluxDrop", "Connecting to $ip...")
 
         FluxDropCore.sessionJoin(ip, port, pinStr, saveDir, object : SessionCallbacks {
             override fun onReady(ip: String, port: Int, pin: Int) {}
@@ -160,8 +183,10 @@ fun ReceiveScreen(modifier: Modifier = Modifier) {
                 sessionEstablished = true
                 peerInfo = peerIp
                 status = "Session active"
+                TransferService.start(context, "FluxDrop", "Connected to $peerIp")
             }
             override fun onSessionEnded() {
+                TransferService.stop(context)
                 sessionEstablished = false
                 selectedDevice = null
                 peerInfo = ""
@@ -175,6 +200,7 @@ fun ReceiveScreen(modifier: Modifier = Modifier) {
             }
             override fun onStatus(message: String) { status = message }
             override fun onError(error: String) {
+                TransferService.stop(context)
                 status = "Error: $error"
                 sessionEstablished = false
                 selectedDevice = null
@@ -487,7 +513,7 @@ fun ReceiveScreen(modifier: Modifier = Modifier) {
                                     if (tempPath.isEmpty()) continue
 
                                     SessionState.currentTransferDeferred = kotlinx.coroutines.CompletableDeferred()
-                                    FluxDropCore.sessionSendFiles(arrayOf(tempPath))
+                                    FluxDropCore.sessionSendFiles(arrayOf(tempPath), arrayOf(fileInfo.name))
 
                                     try {
                                         SessionState.currentTransferDeferred?.await()
@@ -515,6 +541,7 @@ fun ReceiveScreen(modifier: Modifier = Modifier) {
 
                 Button(
                     onClick = {
+                        TransferService.stop(context)
                         FluxDropCore.sessionDisconnect()
                         sessionEstablished = false
                         selectedDevice = null
