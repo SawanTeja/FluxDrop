@@ -422,16 +422,7 @@ void Session::run_message_loop(boost::asio::ip::tcp::socket& socket) {
         }
     }
 
-    // Graceful exit — try to send SESSION_END if we initiated the disconnect
-    if (stop_flag_) {
-        try {
-            protocol::PacketHeader end{static_cast<uint32_t>(protocol::CommandType::SESSION_END), 0, info_.session_id,
-                                       0};
-            transfer::MessageSender::send_header(socket, end);
-        } catch (...) {
-            // Socket may already be closed — that's fine
-        }
-    }
+    // Graceful exit — socket will be closed by disconnect() or stop()
 
     CORE_LOG("Session message loop ended");
     connected_ = false;
@@ -650,16 +641,18 @@ void Session::set_save_dir(const std::string& dir) {
 void Session::disconnect() {
     CORE_LOG("Session::disconnect()");
     stop_flag_ = true;
-    // The message loop will detect stop_flag_ and send SESSION_END before exiting.
-    // Force-close the socket to unblock any in-progress I/O.
     std::lock_guard<std::mutex> lock(socket_mtx_);
+    if (active_socket_) {
+        try {
+            protocol::PacketHeader end{static_cast<uint32_t>(protocol::CommandType::SESSION_END), 0, info_.session_id, 0};
+            transfer::MessageSender::send_header(*active_socket_, end);
+        } catch (...) {}
+        boost::system::error_code ec;
+        active_socket_->close(ec);
+    }
     if (active_acceptor_) {
         boost::system::error_code ec;
         active_acceptor_->close(ec);
-    }
-    if (active_socket_) {
-        boost::system::error_code ec;
-        active_socket_->close(ec);
     }
 }
 
@@ -667,13 +660,17 @@ void Session::stop() {
     CORE_LOG("Session::stop()");
     stop_flag_ = true;
     std::lock_guard<std::mutex> lock(socket_mtx_);
+    if (active_socket_) {
+        try {
+            protocol::PacketHeader end{static_cast<uint32_t>(protocol::CommandType::SESSION_END), 0, info_.session_id, 0};
+            transfer::MessageSender::send_header(*active_socket_, end);
+        } catch (...) {}
+        boost::system::error_code ec;
+        active_socket_->close(ec);
+    }
     if (active_acceptor_) {
         boost::system::error_code ec;
         active_acceptor_->close(ec);
-    }
-    if (active_socket_) {
-        boost::system::error_code ec;
-        active_socket_->close(ec);
     }
 }
 
