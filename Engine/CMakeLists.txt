@@ -40,7 +40,7 @@ target_link_libraries(fluxdrop_core PUBLIC
 )
 
 if (WIN32)
-    target_link_libraries(fluxdrop_core PUBLIC ws2_32 mswsock bcrypt)
+    target_link_libraries(fluxdrop_core PUBLIC ws2_32 mswsock bcrypt iphlpapi)
 endif()
 
 # --- Testing ---

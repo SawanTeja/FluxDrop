@@ -162,6 +162,18 @@ void Session::host(SessionCallbacks callbacks) {
                             boost::system::error_code ec;
                             probe_socket.send_to(boost::asio::buffer(msg), broadcast_ep, 0, ec);
                             probe_socket.send_to(boost::asio::buffer(msg), multicast_ep, 0, ec);
+
+                            auto detailed = get_detailed_network_interfaces();
+                            for (const auto& iface : detailed) {
+                                if (!iface.broadcast_ip.empty() && iface.broadcast_ip != "255.255.255.255") {
+                                    try {
+                                        boost::asio::ip::udp::endpoint iface_bcast(
+                                            boost::asio::ip::make_address(iface.broadcast_ip), DISCOVERY_PORT);
+                                        probe_socket.send_to(boost::asio::buffer(msg), iface_bcast, 0, ec);
+                                    } catch (...) {}
+                                }
+                            }
+
                             std::this_thread::sleep_for(std::chrono::seconds(1));
                         }
                     } catch(...) {}
@@ -187,7 +199,13 @@ void Session::host(SessionCallbacks callbacks) {
                     if (message == "FLUXDROP_DISCOVER") {
                         std::string resp = "FLUXDROP_RESPONSE|" + std::to_string(info_.session_id) + "|" + std::to_string(port_) + "|" + get_instance_id();
                         boost::system::error_code send_ec;
-                        udp_socket.send_to(boost::asio::buffer(resp), sender_endpoint, 0, send_ec);
+                        // Always send directly to the DISCOVERY_PORT where guests listen
+                        boost::asio::ip::udp::endpoint target_ep(sender_endpoint.address(), DISCOVERY_PORT);
+                        udp_socket.send_to(boost::asio::buffer(resp), target_ep, 0, send_ec);
+                        // Also reply to the sender's ephemeral port in case they probe from there
+                        if (sender_endpoint.port() != DISCOVERY_PORT) {
+                            udp_socket.send_to(boost::asio::buffer(resp), sender_endpoint, 0, send_ec);
+                        }
                     }
                 }
                 

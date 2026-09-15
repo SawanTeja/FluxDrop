@@ -57,6 +57,7 @@ target_link_libraries(fluxdrop_gui PRIVATE
     ws2_32
     mswsock
     bcrypt
+    iphlpapi
 )
 
 # Copy assets to build directory so the executable can find them

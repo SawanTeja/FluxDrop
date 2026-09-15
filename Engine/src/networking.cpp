@@ -13,11 +13,24 @@
 #include <stdexcept>
 #include <thread>
 
-#ifdef __ANDROID__
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <iphlpapi.h>
+#ifndef GAA_FLAG_INCLUDE_GATEWAYS
+#define GAA_FLAG_INCLUDE_GATEWAYS 0x0080
+#endif
+#else
 #include <arpa/inet.h>
 #include <ifaddrs.h>
 #include <netinet/in.h>
+#include <net/if.h>
 #endif
+#include <fstream>
+#include <sstream>
 
 using boost::asio::ip::tcp;
 
@@ -86,25 +99,261 @@ uint64_t available_space_for_target(const fs::path& target_path) {
 
 } // namespace
 
-std::vector<std::string> get_network_interfaces(boost::asio::io_context& io_context) {
-    std::vector<std::string> interfaces;
-#ifdef __ANDROID__
-    struct ifaddrs *ifap, *ifa;
-    struct sockaddr_in* sa;
-    if (getifaddrs(&ifap) != -1) {
-        for (ifa = ifap; ifa != nullptr; ifa = ifa->ifa_next) {
-            if (ifa->ifa_addr != nullptr && ifa->ifa_addr->sa_family == AF_INET) {
-                sa = (struct sockaddr_in*)ifa->ifa_addr;
-                char* addr = inet_ntoa(sa->sin_addr);
-                std::string s_addr(addr);
-                if (s_addr != "127.0.0.1" && std::string(ifa->ifa_name).find("dummy") == std::string::npos) {
-                    interfaces.push_back(s_addr);
+#ifdef _WIN32
+std::vector<InterfaceAddress> get_detailed_network_interfaces() {
+    std::vector<InterfaceAddress> result;
+    ULONG flags = GAA_FLAG_INCLUDE_PREFIX | GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER;
+    ULONG outBufLen = 15000;
+    PIP_ADAPTER_ADDRESSES pAddresses = (IP_ADAPTER_ADDRESSES*)malloc(outBufLen);
+    if (!pAddresses) {
+        return result;
+    }
+    DWORD dwRetVal = GetAdaptersAddresses(AF_INET, flags, NULL, pAddresses, &outBufLen);
+    if (dwRetVal == ERROR_BUFFER_OVERFLOW) {
+        free(pAddresses);
+        pAddresses = (IP_ADAPTER_ADDRESSES*)malloc(outBufLen);
+        if (!pAddresses) {
+            return result;
+        }
+        dwRetVal = GetAdaptersAddresses(AF_INET, flags, NULL, pAddresses, &outBufLen);
+    }
+
+    if (dwRetVal == NO_ERROR) {
+        for (PIP_ADAPTER_ADDRESSES pCurr = pAddresses; pCurr; pCurr = pCurr->Next) {
+            if (pCurr->OperStatus != IfOperStatusUp) {
+                continue;
+            }
+            if (pCurr->IfType == IF_TYPE_SOFTWARE_LOOPBACK) {
+                continue;
+            }
+
+            char descBuf[256] = {0};
+            if (pCurr->Description) {
+                WideCharToMultiByte(CP_UTF8, 0, pCurr->Description, -1, descBuf, sizeof(descBuf), NULL, NULL);
+            }
+            char nameBuf[256] = {0};
+            if (pCurr->FriendlyName) {
+                WideCharToMultiByte(CP_UTF8, 0, pCurr->FriendlyName, -1, nameBuf, sizeof(nameBuf), NULL, NULL);
+            }
+
+            std::string desc(descBuf);
+            std::string friendly(nameBuf);
+
+            bool is_hotspot = (desc.find("Wi-Fi Direct") != std::string::npos ||
+                               desc.find("Virtual") != std::string::npos ||
+                               friendly.find("Hotspot") != std::string::npos);
+
+            bool is_cellular = (pCurr->IfType == 243 /* IF_TYPE_WWANPP */ || 
+                                pCurr->IfType == 244 /* IF_TYPE_WWANPP2 */ ||
+                                desc.find("Cellular") != std::string::npos ||
+                                desc.find("Mobile Broadband") != std::string::npos);
+
+            for (PIP_ADAPTER_UNICAST_ADDRESS pUnicast = pCurr->FirstUnicastAddress; pUnicast; pUnicast = pUnicast->Next) {
+                if (pUnicast->Address.lpSockaddr && pUnicast->Address.lpSockaddr->sa_family == AF_INET) {
+                    sockaddr_in* sa_in = (sockaddr_in*)pUnicast->Address.lpSockaddr;
+                    char ip_buf[INET_ADDRSTRLEN] = {0};
+                    if (inet_ntop(AF_INET, &(sa_in->sin_addr), ip_buf, sizeof(ip_buf))) {
+                        std::string ip_str(ip_buf);
+                        if (ip_str == "127.0.0.1" || ip_str.find("169.254.") == 0) {
+                            continue;
+                        }
+
+                        // Calculate broadcast IP
+                        UINT8 prefixLen = pUnicast->OnLinkPrefixLength;
+                        uint32_t ip_host = ntohl(sa_in->sin_addr.s_addr);
+                        uint32_t mask_host = 0xFFFFFFFFu;
+                        if (prefixLen == 0) {
+                            mask_host = 0;
+                        } else if (prefixLen < 32) {
+                            mask_host = ~((1u << (32 - prefixLen)) - 1u);
+                        }
+                        uint32_t bcast_host = ip_host | (~mask_host);
+                        struct in_addr bcast_addr;
+                        bcast_addr.s_addr = htonl(bcast_host);
+                        char bcast_buf[INET_ADDRSTRLEN] = {0};
+                        inet_ntop(AF_INET, &bcast_addr, bcast_buf, sizeof(bcast_buf));
+
+                        InterfaceAddress iface;
+                        iface.ip = ip_str;
+                        iface.broadcast_ip = bcast_buf;
+                        iface.name = friendly.empty() ? desc : friendly;
+                        iface.is_loopback = false;
+                        iface.is_cellular = is_cellular;
+                        iface.is_hotspot = is_hotspot || (ip_str.find("192.168.137.") == 0);
+
+                        result.push_back(iface);
+                    }
                 }
             }
         }
-        freeifaddrs(ifap);
     }
+    free(pAddresses);
+    return result;
+}
+#else
+std::vector<InterfaceAddress> get_detailed_network_interfaces() {
+    std::vector<InterfaceAddress> result;
+    struct ifaddrs* ifap = nullptr;
+    if (getifaddrs(&ifap) != 0 || !ifap) {
+        return result;
+    }
+
+    for (struct ifaddrs* ifa = ifap; ifa != nullptr; ifa = ifa->ifa_next) {
+        if (!ifa->ifa_addr || ifa->ifa_addr->sa_family != AF_INET) {
+            continue;
+        }
+        if (!(ifa->ifa_flags & IFF_UP) || (ifa->ifa_flags & IFF_LOOPBACK)) {
+            continue;
+        }
+
+        std::string ifname = ifa->ifa_name ? ifa->ifa_name : "";
+        if (ifname.find("dummy") != std::string::npos || ifname.find("lo") == 0) {
+            continue;
+        }
+
+        sockaddr_in* sa = (sockaddr_in*)ifa->ifa_addr;
+        char ip_buf[INET_ADDRSTRLEN] = {0};
+        if (!inet_ntop(AF_INET, &(sa->sin_addr), ip_buf, sizeof(ip_buf))) {
+            continue;
+        }
+        std::string ip_str(ip_buf);
+        if (ip_str == "127.0.0.1" || ip_str.find("169.254.") == 0) {
+            continue;
+        }
+
+        std::string bcast_str = "255.255.255.255";
+        if ((ifa->ifa_flags & IFF_BROADCAST) && ifa->ifa_broadaddr) {
+            sockaddr_in* bsa = (sockaddr_in*)ifa->ifa_broadaddr;
+            char b_buf[INET_ADDRSTRLEN] = {0};
+            if (inet_ntop(AF_INET, &(bsa->sin_addr), b_buf, sizeof(b_buf))) {
+                bcast_str = b_buf;
+            }
+        } else if (ifa->ifa_netmask) {
+            sockaddr_in* nmsa = (sockaddr_in*)ifa->ifa_netmask;
+            uint32_t ip_h = ntohl(sa->sin_addr.s_addr);
+            uint32_t nm_h = ntohl(nmsa->sin_addr.s_addr);
+            uint32_t bc_h = ip_h | (~nm_h);
+            struct in_addr bc_addr;
+            bc_addr.s_addr = htonl(bc_h);
+            char b_buf[INET_ADDRSTRLEN] = {0};
+            if (inet_ntop(AF_INET, &bc_addr, b_buf, sizeof(b_buf))) {
+                bcast_str = b_buf;
+            }
+        }
+
+        bool is_cellular = (ifname.find("rmnet") == 0 ||
+                            ifname.find("ccmni") == 0 ||
+                            ifname.find("pdp") == 0 ||
+                            ifname.find("wwan") == 0 ||
+                            ifname.find("seth") == 0);
+
+        bool is_hotspot = (ifname.find("ap") == 0 ||
+                           ifname.find("softap") != std::string::npos ||
+                           ifname.find("swlan") == 0 ||
+                           ifname.find("tether") != std::string::npos ||
+                           ip_str.find("192.168.43.") == 0 ||
+                           ip_str.find("192.168.44.") == 0 ||
+                           ip_str.find("192.168.49.") == 0);
+
+        InterfaceAddress iface;
+        iface.ip = ip_str;
+        iface.broadcast_ip = bcast_str;
+        iface.name = ifname;
+        iface.is_loopback = false;
+        iface.is_cellular = is_cellular;
+        iface.is_hotspot = is_hotspot;
+
+        result.push_back(iface);
+    }
+
+    freeifaddrs(ifap);
+    return result;
+}
 #endif
+
+std::string get_default_gateway_ip() {
+#ifdef _WIN32
+    ULONG flags = GAA_FLAG_INCLUDE_GATEWAYS | GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER;
+    ULONG outBufLen = 15000;
+    PIP_ADAPTER_ADDRESSES pAddresses = (IP_ADAPTER_ADDRESSES*)malloc(outBufLen);
+    if (!pAddresses) return "";
+    DWORD ret = GetAdaptersAddresses(AF_INET, flags, NULL, pAddresses, &outBufLen);
+    if (ret == ERROR_BUFFER_OVERFLOW) {
+        free(pAddresses);
+        pAddresses = (IP_ADAPTER_ADDRESSES*)malloc(outBufLen);
+        if (!pAddresses) return "";
+        ret = GetAdaptersAddresses(AF_INET, flags, NULL, pAddresses, &outBufLen);
+    }
+    std::string gateway_ip = "";
+    if (ret == NO_ERROR) {
+        for (PIP_ADAPTER_ADDRESSES pCurr = pAddresses; pCurr; pCurr = pCurr->Next) {
+            if (pCurr->OperStatus != IfOperStatusUp) continue;
+            for (PIP_ADAPTER_GATEWAY_ADDRESS pGw = pCurr->FirstGatewayAddress; pGw; pGw = pGw->Next) {
+                if (pGw->Address.lpSockaddr && pGw->Address.lpSockaddr->sa_family == AF_INET) {
+                    sockaddr_in* sa_in = (sockaddr_in*)pGw->Address.lpSockaddr;
+                    char gw_buf[INET_ADDRSTRLEN] = {0};
+                    if (inet_ntop(AF_INET, &(sa_in->sin_addr), gw_buf, sizeof(gw_buf))) {
+                        std::string gw(gw_buf);
+                        if (!gw.empty() && gw != "0.0.0.0") {
+                            gateway_ip = gw;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (!gateway_ip.empty()) break;
+        }
+    }
+    free(pAddresses);
+    return gateway_ip;
+#else
+    std::ifstream route_file("/proc/net/route");
+    if (!route_file.is_open()) return "";
+    std::string line;
+    std::getline(route_file, line); // Skip header
+    while (std::getline(route_file, line)) {
+        std::istringstream iss(line);
+        std::string iface, dest_hex, gw_hex;
+        if (iss >> iface >> dest_hex >> gw_hex) {
+            if (dest_hex == "00000000" && gw_hex != "00000000") {
+                try {
+                    unsigned long gw_val = std::stoul(gw_hex, nullptr, 16);
+                    struct in_addr addr;
+                    addr.s_addr = static_cast<in_addr_t>(gw_val);
+                    char buf[INET_ADDRSTRLEN] = {0};
+                    if (inet_ntop(AF_INET, &addr, buf, sizeof(buf))) {
+                        std::string gw(buf);
+                        if (!gw.empty() && gw != "0.0.0.0") {
+                            return gw;
+                        }
+                    }
+                } catch (...) {}
+            }
+        }
+    }
+    return "";
+#endif
+}
+
+std::vector<std::string> get_network_interfaces(boost::asio::io_context& io_context) {
+    auto detailed = get_detailed_network_interfaces();
+    // Prioritize interfaces:
+    // 1. Hotspot AP interfaces (is_hotspot)
+    // 2. Standard Wi-Fi / Ethernet
+    // 3. Cellular (is_cellular)
+    std::stable_sort(detailed.begin(), detailed.end(), [](const InterfaceAddress& a, const InterfaceAddress& b) {
+        int score_a = (a.is_hotspot ? 2 : 0) - (a.is_cellular ? 2 : 0);
+        int score_b = (b.is_hotspot ? 2 : 0) - (b.is_cellular ? 2 : 0);
+        return score_a > score_b;
+    });
+
+    std::vector<std::string> interfaces;
+    for (const auto& iface : detailed) {
+        if (!iface.ip.empty() && iface.ip != "127.0.0.1") {
+            interfaces.push_back(iface.ip);
+        }
+    }
+
     if (interfaces.empty()) {
         try {
             boost::asio::ip::udp::socket socket(io_context);
@@ -173,7 +422,7 @@ void DiscoveryListener::start(uint32_t room_id, DeviceFoundCallback callback) {
 
             socket.non_blocking(true);
 
-            // Periodically send DISCOVER request
+            // Periodically send DISCOVER request across all subnets and gateway
             std::thread prober([this]() {
                 try {
                     boost::asio::io_context probe_io;
@@ -186,8 +435,33 @@ void DiscoveryListener::start(uint32_t room_id, DeviceFoundCallback callback) {
                     while (running_) {
                         std::string req = "FLUXDROP_DISCOVER";
                         boost::system::error_code ec;
+
+                        // 1. General broadcast & multicast
                         probe_socket.send_to(boost::asio::buffer(req), broadcast_ep, 0, ec);
                         probe_socket.send_to(boost::asio::buffer(req), multicast_ep, 0, ec);
+
+                        // 2. Targeted broadcast on each active network interface subnet
+                        auto detailed = get_detailed_network_interfaces();
+                        for (const auto& iface : detailed) {
+                            if (!iface.broadcast_ip.empty() && iface.broadcast_ip != "255.255.255.255") {
+                                try {
+                                    boost::asio::ip::udp::endpoint iface_bcast(
+                                        boost::asio::ip::make_address(iface.broadcast_ip), DISCOVERY_PORT);
+                                    probe_socket.send_to(boost::asio::buffer(req), iface_bcast, 0, ec);
+                                } catch (...) {}
+                            }
+                        }
+
+                        // 3. Unicast probe to default gateway (hotspot host fastpath)
+                        std::string gw = get_default_gateway_ip();
+                        if (!gw.empty()) {
+                            try {
+                                boost::asio::ip::udp::endpoint gw_ep(
+                                    boost::asio::ip::make_address(gw), DISCOVERY_PORT);
+                                probe_socket.send_to(boost::asio::buffer(req), gw_ep, 0, ec);
+                            } catch (...) {}
+                        }
+
                         std::this_thread::sleep_for(std::chrono::seconds(1));
                     }
                 } catch(...) {}
@@ -296,8 +570,19 @@ void Server::start_gui(std::queue<TransferJob> jobs, ServerCallbacks callbacks) 
                 while (broadcasting) {
                     std::string msg =
                         "FLUXDROP|" + std::to_string(session_id) + "|" + std::to_string(port) + "|" + get_instance_id();
-                    udp_socket.send_to(boost::asio::buffer(msg), broadcast_ep);
-                    udp_socket.send_to(boost::asio::buffer(msg), multicast_ep);
+                    boost::system::error_code ec;
+                    udp_socket.send_to(boost::asio::buffer(msg), broadcast_ep, 0, ec);
+                    udp_socket.send_to(boost::asio::buffer(msg), multicast_ep, 0, ec);
+                    auto detailed = get_detailed_network_interfaces();
+                    for (const auto& iface : detailed) {
+                        if (!iface.broadcast_ip.empty() && iface.broadcast_ip != "255.255.255.255") {
+                            try {
+                                boost::asio::ip::udp::endpoint iface_bcast(
+                                    boost::asio::ip::make_address(iface.broadcast_ip), DISCOVERY_PORT);
+                                udp_socket.send_to(boost::asio::buffer(msg), iface_bcast, 0, ec);
+                            } catch (...) {}
+                        }
+                    }
                     std::this_thread::sleep_for(std::chrono::seconds(1));
                 }
             } catch (...) {

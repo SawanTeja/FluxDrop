@@ -15,6 +15,17 @@ namespace networking {
 constexpr const char* MULTICAST_GROUP = "224.0.0.167";
 constexpr unsigned short DISCOVERY_PORT = 45454;
 
+struct InterfaceAddress {
+    std::string ip;
+    std::string broadcast_ip;
+    std::string name;
+    bool is_loopback = false;
+    bool is_cellular = false;
+    bool is_hotspot = false;
+};
+
+std::vector<InterfaceAddress> get_detailed_network_interfaces();
+std::string get_default_gateway_ip();
 std::vector<std::string> get_network_interfaces(boost::asio::io_context& io_context);
 
 struct TransferJob {
