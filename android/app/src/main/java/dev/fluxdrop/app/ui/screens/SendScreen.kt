@@ -24,6 +24,7 @@ import dev.fluxdrop.app.bridge.FluxDropCore
 import dev.fluxdrop.app.bridge.SessionCallbacks
 import dev.fluxdrop.app.ui.components.TransferProgress
 import dev.fluxdrop.app.ui.components.TransferState
+import dev.fluxdrop.app.ui.state.SessionState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -109,6 +110,7 @@ fun SendScreen(modifier: Modifier = Modifier) {
                     onClick = {
                         isHosting = true
                         status = "Starting session..."
+                        SessionState.isSessionActive.value = true
                         val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(
                             android.os.Environment.DIRECTORY_DOWNLOADS
                         ).absolutePath
@@ -126,6 +128,8 @@ fun SendScreen(modifier: Modifier = Modifier) {
                             override fun onSessionEnded() {
                                 sessionEstablished = false
                                 isHosting = false
+                                SessionState.isSessionActive.value = false
+                                SessionState.autoAcceptIncoming = false
                                 peerInfo = ""
                                 pin = ""
                                 status = "Session ended"
@@ -135,12 +139,16 @@ fun SendScreen(modifier: Modifier = Modifier) {
                             override fun onError(error: String) {
                                 status = "Error: $error"
                                 isHosting = false
+                                SessionState.isSessionActive.value = false
                             }
                             override fun onFileOffer(filename: String, fileSize: Long): Boolean {
+                                if (SessionState.autoAcceptIncoming) return true
+
                                 val latch = CountDownLatch(1)
                                 var accepted = false
                                 incomingOffer = IncomingFileOffer(filename, fileSize) { response ->
                                     accepted = response
+                                    if (response) SessionState.autoAcceptIncoming = true
                                     latch.countDown()
                                 }
                                 try {
@@ -188,6 +196,7 @@ fun SendScreen(modifier: Modifier = Modifier) {
                     onClick = {
                         FluxDropCore.sessionDisconnect()
                         isHosting = false
+                        SessionState.isSessionActive.value = false
                         pin = ""
                         status = "Ready to host"
                     },
@@ -290,6 +299,7 @@ fun SendScreen(modifier: Modifier = Modifier) {
                         FluxDropCore.sessionDisconnect()
                         sessionEstablished = false
                         isHosting = false
+                        SessionState.isSessionActive.value = false
                         peerInfo = ""
                         pin = ""
                         status = "Ready to host"

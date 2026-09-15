@@ -30,6 +30,7 @@ static QLabel* g_s_session_status_lbl = nullptr;
 static QLabel* g_s_session_peer_lbl = nullptr;
 static QProgressBar* g_s_progress_br = nullptr;
 static QLabel* g_s_progress_lbl = nullptr;
+static bool g_auto_accept_incoming = false;
 
 SessionPanel::SessionPanel(QWidget* parent) : QWidget(parent) {
 
@@ -459,6 +460,8 @@ void SessionPanel::connect_to_device(const networking::DiscoveredDevice& device)
             },
             // on_file_offer
             [](const char* filename, uint64_t size) -> bool {
+                if (g_auto_accept_incoming) return true;
+
                 std::promise<bool> prom;
                 auto fut = prom.get_future();
 
@@ -499,6 +502,7 @@ void SessionPanel::connect_to_device(const networking::DiscoveredDevice& device)
 
                         QObject::connect(accept_btn, &QPushButton::clicked, dialog, [dialog, prom_ptr, answered]() {
                             if (!*answered) {
+                                g_auto_accept_incoming = true;
                                 prom_ptr->set_value(true);
                                 *answered = true;
                             }
@@ -630,6 +634,7 @@ void SessionPanel::on_host_clicked() {
             QMetaObject::invokeMethod(g_active_panel,
                 [gen]() {
                     if (gen != g_session_gen.load()) return;
+                    g_auto_accept_incoming = false;
                     g_active_panel->session_active_ = false;
                     g_active_panel->show_pre_session();
                 },
@@ -671,6 +676,8 @@ void SessionPanel::on_host_clicked() {
         },
         // on_file_offer (same dialog as join)
         [](const char* filename, uint64_t size) -> bool {
+            if (g_auto_accept_incoming) return true;
+
             std::promise<bool> prom;
             auto fut = prom.get_future();
 
@@ -711,6 +718,7 @@ void SessionPanel::on_host_clicked() {
 
                     QObject::connect(accept_btn, &QPushButton::clicked, dialog, [dialog, prom_ptr, answered]() {
                         if (!*answered) {
+                            g_auto_accept_incoming = true;
                             prom_ptr->set_value(true);
                             *answered = true;
                         }

@@ -29,6 +29,7 @@ import dev.fluxdrop.app.bridge.FluxDropCore
 import dev.fluxdrop.app.bridge.SessionCallbacks
 import dev.fluxdrop.app.ui.components.TransferProgress
 import dev.fluxdrop.app.ui.components.TransferState
+import dev.fluxdrop.app.ui.state.SessionState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -145,6 +146,7 @@ fun ReceiveScreen(modifier: Modifier = Modifier) {
         FluxDropCore.stopDiscovery()
         File(saveDir).mkdirs()
         status = "Connecting..."
+        SessionState.isSessionActive.value = true
 
         FluxDropCore.sessionJoin(ip, port, pinStr, saveDir, object : SessionCallbacks {
             override fun onReady(ip: String, port: Int, pin: Int) {}
@@ -161,18 +163,24 @@ fun ReceiveScreen(modifier: Modifier = Modifier) {
                 status = "Session ended"
                 transferState = TransferState()
                 selectedFilesToSend = emptyList()
+                SessionState.isSessionActive.value = false
+                SessionState.autoAcceptIncoming = false
             }
             override fun onStatus(message: String) { status = message }
             override fun onError(error: String) {
                 status = "Error: $error"
                 sessionEstablished = false
                 selectedDevice = null
+                SessionState.isSessionActive.value = false
             }
             override fun onFileOffer(filename: String, fileSize: Long): Boolean {
+                if (SessionState.autoAcceptIncoming) return true
+
                 val latch = CountDownLatch(1)
                 var accepted = false
                 incomingOffer = IncomingFileOffer(filename, fileSize) { response ->
                     accepted = response
+                    if (response) SessionState.autoAcceptIncoming = true
                     latch.countDown()
                 }
                 try {
@@ -472,6 +480,7 @@ fun ReceiveScreen(modifier: Modifier = Modifier) {
                         status = "Scanning for devices..."
                         transferState = TransferState()
                         selectedFilesToSend = emptyList()
+                        SessionState.isSessionActive.value = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = dev.fluxdrop.app.ui.theme.FluxRed),
                     shape = RoundedCornerShape(8.dp)

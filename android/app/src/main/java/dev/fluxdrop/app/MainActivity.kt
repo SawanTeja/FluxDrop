@@ -34,6 +34,7 @@ import dev.fluxdrop.app.ui.screens.ReceiveScreen
 import dev.fluxdrop.app.ui.screens.SendScreen
 import dev.fluxdrop.app.ui.theme.FluxDropTheme
 import dev.fluxdrop.app.ui.theme.FluxPrimary
+import dev.fluxdrop.app.ui.state.SessionState
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -91,6 +92,7 @@ class MainActivity : ComponentActivity() {
 fun FluxDropApp() {
     val pagerState = rememberPagerState(pageCount = { 2 })
     val coroutineScope = rememberCoroutineScope()
+    val isSessionActive by SessionState.isSessionActive
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background
@@ -124,23 +126,23 @@ fun FluxDropApp() {
                 ) {
                     Tab(
                         selected = pagerState.currentPage == 0,
-                        onClick = { coroutineScope.launch { pagerState.animateScrollToPage(0) } },
+                        onClick = { if (!isSessionActive) coroutineScope.launch { pagerState.animateScrollToPage(0) } },
                         modifier = Modifier.background(
                             if (pagerState.currentPage == 0) FluxPrimary else Color.Transparent,
                             shape = RoundedCornerShape(8.dp)
                         ).padding(8.dp)
                     ) {
-                        Text("Host Session", color = Color.White)
+                        Text("Host Session", color = if (isSessionActive && pagerState.currentPage != 0) Color.Gray else Color.White)
                     }
                     Tab(
                         selected = pagerState.currentPage == 1,
-                        onClick = { coroutineScope.launch { pagerState.animateScrollToPage(1) } },
+                        onClick = { if (!isSessionActive) coroutineScope.launch { pagerState.animateScrollToPage(1) } },
                         modifier = Modifier.background(
                             if (pagerState.currentPage == 1) FluxPrimary else Color.Transparent,
                             shape = RoundedCornerShape(8.dp)
                         ).padding(8.dp)
                     ) {
-                        Text("Join Session", color = Color.White)
+                        Text("Join Session", color = if (isSessionActive && pagerState.currentPage != 1) Color.Gray else Color.White)
                     }
                 }
 
@@ -149,6 +151,7 @@ fun FluxDropApp() {
             
             HorizontalPager(
                 state = pagerState,
+                userScrollEnabled = !isSessionActive,
                 modifier = Modifier.weight(1f)
             ) { page ->
                 if (page == 0) {
