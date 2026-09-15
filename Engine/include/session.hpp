@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "networking.hpp"
+#include "protocol/packet.hpp"
 
 namespace networking {
 

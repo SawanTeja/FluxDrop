@@ -582,7 +582,7 @@ void Session::process_send_batch(boost::asio::ip::tcp::socket& socket, const std
         protocol::FileInfo file_info{job.filename, fsize, "application/octet-stream"};
         if (callbacks_.on_status)
             callbacks_.on_status("Sending: " + file_info.filename);
-        transfer::MessageSender::send_file_meta(socket, file_info);
+        transfer::MessageSender::send_file_meta(socket, file_info, job.session_id);
 
         // Wait for peer response
         bool job_done = false;

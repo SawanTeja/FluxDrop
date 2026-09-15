@@ -53,13 +53,14 @@ void MessageSender::send_header(boost::asio::ip::tcp::socket& socket, const prot
     }
 }
 
-void MessageSender::send_file_meta(boost::asio::ip::tcp::socket& socket, const protocol::FileInfo& info) {
+void MessageSender::send_file_meta(boost::asio::ip::tcp::socket& socket, const protocol::FileInfo& info,
+                                   uint32_t session_id) {
     try {
         nlohmann::json j = info;
         std::string payload = j.dump();
 
         protocol::PacketHeader header{static_cast<uint32_t>(protocol::CommandType::FILE_META),
-                                      static_cast<uint32_t>(payload.size()), 0, 0};
+                                      static_cast<uint32_t>(payload.size()), session_id, 0};
 
         send_header(socket, header);
         boost::asio::write(socket, boost::asio::buffer(payload));

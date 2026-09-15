@@ -109,6 +109,10 @@ fun SendScreen(modifier: Modifier = Modifier) {
                     onClick = {
                         isHosting = true
                         status = "Starting session..."
+                        val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(
+                            android.os.Environment.DIRECTORY_DOWNLOADS
+                        ).absolutePath
+                        FluxDropCore.sessionSetSaveDir(downloadsDir)
                         FluxDropCore.sessionHost(object : SessionCallbacks {
                             override fun onReady(ip: String, port: Int, newPin: Int) {
                                 pin = String.format("%04d", newPin)

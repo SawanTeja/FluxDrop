@@ -390,7 +390,7 @@ void Server::start_gui(std::queue<TransferJob> jobs, ServerCallbacks callbacks) 
                 protocol::FileInfo file_info{job.filename, fsize, "application/octet-stream"};
                 if (callbacks.on_status)
                     callbacks.on_status("Sending: " + file_info.filename);
-                transfer::MessageSender::send_file_meta(socket, file_info);
+                transfer::MessageSender::send_file_meta(socket, file_info, job.session_id);
 
                 bool job_done = false;
                 while (!job_done) {

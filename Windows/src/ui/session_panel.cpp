@@ -446,9 +446,14 @@ void SessionPanel::connect_to_device(const networking::DiscoveredDevice& device)
                 QMetaObject::invokeMethod(g_active_panel,
                     [gen, text]() {
                         if (gen != g_session_gen.load()) return;
-                        g_s_session_status_lbl->setText(text);
-                        g_active_panel->session_active_ = false;
-                        g_active_panel->show_pre_session();
+                        if (g_active_panel->session_active_) {
+                            // During active session: show error but don't kill session
+                            g_s_session_status_lbl->setText(text);
+                        } else {
+                            // Pre-session: show error and go back
+                            g_s_session_status_lbl->setText(text);
+                            g_active_panel->show_pre_session();
+                        }
                     },
                     Qt::QueuedConnection);
             },
@@ -654,11 +659,13 @@ void SessionPanel::on_host_clicked() {
                 [gen, text]() {
                     if (gen != g_session_gen.load()) return;
                     if (g_active_panel->session_active_) {
+                        // During active session: show error but don't kill session
+                        // (session_ended callback will handle cleanup if the connection is truly lost)
                         g_s_session_status_lbl->setText(text);
                     } else {
+                        // Pre-session (hosting phase): show error and go back
                         g_s_host_status_lbl->setText(text);
                     }
-                    g_active_panel->session_active_ = false;
                 },
                 Qt::QueuedConnection);
         },

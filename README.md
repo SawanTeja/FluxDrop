@@ -85,14 +85,14 @@ Use **[BUILD_AND_RUN_GUIDE.md](BUILD_AND_RUN_GUIDE.md)** as the source of truth 
 
 Quick summary:
 
-- **Windows (MSYS2 MinGW32):** install `mingw-w64-i686-*` dependencies, build the root project first, then build `Win-Linux/`
-- **Linux:** install the CLI/core dependencies, add GTK4 if you want the desktop app, then build the root project first and `Win-Linux/` second
+- **Windows (MSYS2 MinGW64):** install `mingw-w64-x86_64-*` dependencies, build the root project first, then build `Windows/`
+- **Linux:** install the CLI/core dependencies, add GTK4 if you want the desktop app, then build the root project first and `Linux/` second
 - **Android:** use **JDK 17 or JDK 21**, install SDK 34 + NDK + CMake 3.22.1, and make sure `android/app/src/main/cpp/third_party/boost` and `android/app/src/main/cpp/third_party/libsodium` exist before running Gradle
 
 Main outputs:
 
 - CLI: `build/fluxdrop` or `build/fluxdrop.exe`
-- Desktop GUI: `Win-Linux/build/fluxdrop_gui` or `Win-Linux/build/fluxdrop_gui.exe`
+- Desktop GUI: `Linux/build/fluxdrop_gui` or `Windows/build/fluxdrop_gui.exe`
 - Android APK: `android/app/build/outputs/apk/debug/app-debug.apk`
 
 ---
@@ -137,7 +137,7 @@ Open the app. Use the **Send** tab to select files. Use the **Receive** tab to d
 | Connection refused | Verify sender is running; check TCP port isn't blocked |
 | Discovery fails on hotspot | Use "Connect by IP" and enter the sender's IP:port manually, common issue with Android devices |
 | `libsodium initialization failed` | Reinstall libsodium-devel, rebuild |
-| Windows says a `*.dll` file is missing | From the MSYS2 MinGW shell, run `sh Win-Linux/deploy.sh build/fluxdrop.exe Win-Linux/build/fluxdrop_gui.exe` to copy all required runtime DLLs beside both Windows executables |
+| Windows says a `*.dll` file is missing | From the MSYS2 MinGW shell, run `sh Windows/deploy.sh Windows/build/fluxdrop_gui.exe` to copy all required runtime DLLs beside the executable |
 | Build fails on nlohmann/json | Install `json-devel` (Fedora) or `nlohmann-json3-dev` (Ubuntu) |
 | Wrong PIN repeatedly | Restart sender to generate a new PIN |
 | `.fluxpart` file left behind | Partial download from interrupted transfer; resume or delete |

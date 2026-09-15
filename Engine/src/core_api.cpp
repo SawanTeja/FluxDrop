@@ -262,6 +262,7 @@ void fd_request_cancel_client() {
 
 static std::unique_ptr<networking::Session> g_session;
 static std::thread g_session_thread;
+static std::string g_session_save_dir;  // Persists across session recreation
 
 void fd_session_host(fd_session_ready_cb ready_cb, fd_session_established_cb established_cb,
                      fd_session_ended_cb ended_cb, fd_session_status_cb status_cb, fd_session_error_cb error_cb,
@@ -274,6 +275,11 @@ void fd_session_host(fd_session_ready_cb ready_cb, fd_session_established_cb est
     fd_session_disconnect();
 
     g_session = std::make_unique<networking::Session>();
+
+    // Re-apply persisted save directory to the new session
+    if (!g_session_save_dir.empty()) {
+        g_session->set_save_dir(g_session_save_dir);
+    }
 
     networking::SessionCallbacks callbacks;
     callbacks.on_ready = [ready_cb](const std::string& ip, unsigned short port, uint16_t pin) {
@@ -381,6 +387,11 @@ void fd_session_join(const char* ip, int port, const char* pin, const char* save
     std::string pin_str = pin ? pin : "";
     std::string dir_str = save_dir ? save_dir : "";
 
+    // Persist save dir for future sessions
+    if (!dir_str.empty()) {
+        g_session_save_dir = dir_str;
+    }
+
     g_session_thread = std::thread([s = g_session.get(), ip_str, port, pin_str, dir_str, callbacks]() {
         CORE_LOG("Session join thread started — connecting to " << ip_str << ":" << port);
         s->join(ip_str, port, pin_str, dir_str, callbacks);
@@ -405,8 +416,11 @@ void fd_session_send_files(const char** file_paths, int num_files) {
 
 void fd_session_set_save_dir(const char* dir) {
     CORE_LOG("fd_session_set_save_dir() — " << (dir ? dir : "null"));
-    if (g_session && dir) {
-        g_session->set_save_dir(dir);
+    if (dir) {
+        g_session_save_dir = dir;
+        if (g_session) {
+            g_session->set_save_dir(dir);
+        }
     }
 }
 
