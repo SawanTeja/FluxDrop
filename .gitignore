@@ -3,6 +3,8 @@ build.txt
 connect.txt
 connect.log
 Plan.md
+BUILD_AND_RUN_GUIDE.md
+report.md
 
 # Common local build outputs
 CMakeCache.txt
@@ -69,3 +71,6 @@ Windows/dist/
 *.db
 .DS_Store
 Thumbs.db
+
+.Guide/
+Guide
