@@ -43,6 +43,36 @@ if (WIN32)
     target_link_libraries(fluxdrop_core PUBLIC ws2_32 mswsock bcrypt iphlpapi)
 endif()
 
+# --- Core Shared Library (for dynamic linking and FFI bindings: Python, Dart, C, etc.) ---
+add_library(fluxdrop_core_shared SHARED
+    src/networking.cpp
+    src/transfer.cpp
+    src/packet.cpp
+    src/security.cpp
+    src/session.cpp
+    src/core_api.cpp
+)
+
+set_target_properties(fluxdrop_core_shared PROPERTIES OUTPUT_NAME "fluxdrop_core")
+
+target_include_directories(fluxdrop_core_shared PUBLIC
+    include
+    ${Boost_INCLUDE_DIRS}
+    ${SODIUM_INCLUDE_DIRS}
+)
+
+target_link_libraries(fluxdrop_core_shared PUBLIC
+    fluxdrop_logger
+    Threads::Threads
+    nlohmann_json::nlohmann_json
+    ${Boost_LIBRARIES}
+    ${SODIUM_LIBRARIES}
+)
+
+if (WIN32)
+    target_link_libraries(fluxdrop_core_shared PUBLIC ws2_32 mswsock bcrypt iphlpapi)
+endif()
+
 # --- Testing ---
 include(CTest)
 enable_testing()
