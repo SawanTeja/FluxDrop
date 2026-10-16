@@ -19,6 +19,12 @@ add_executable(fluxdrop_gui
     src/ui/device_list.cpp
     src/ui/file_sender.cpp
     src/ui/transfer_dialog.cpp
+    src/ui/session_panel.cpp
+    include/ui/main_window.hpp
+    include/ui/device_list.hpp
+    include/ui/file_sender.hpp
+    include/ui/transfer_dialog.hpp
+    include/ui/session_panel.hpp
 )
 
 # Include core headers and local UI headers

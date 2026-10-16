@@ -4,8 +4,7 @@
 
 namespace ui {
 
-class FileSenderPanel;
-class DeviceListPanel;
+class SessionPanel;
 
 class MainWindow {
   public:
@@ -16,10 +15,7 @@ class MainWindow {
 
   private:
     GtkWidget* window_;
-    GtkWidget* stack_;
-
-    FileSenderPanel* send_panel_;
-    DeviceListPanel* receive_panel_;
+    SessionPanel* session_panel_;
 
     void setup_css();
     static void on_destroy(GtkWidget* widget, gpointer data);

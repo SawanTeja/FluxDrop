@@ -1,8 +1,6 @@
 #include "ui/main_window.hpp"
 #include "logger.hpp"
-#include "ui/device_list.hpp"
-#include "ui/file_sender.hpp"
-#include <iostream>
+#include "ui/session_panel.hpp"
 
 namespace ui {
 
@@ -17,30 +15,12 @@ window {
     padding: 8px;
 }
 
-stackswitcher button {
-    color: #a0a0c0;
-    background: transparent;
-    border: none;
-    border-radius: 8px;
-    padding: 6px 16px;
-    margin: 4px;
-}
-
-stackswitcher button:checked {
-    background-color: #533483;
-    color: white;
-}
-
-stackswitcher button:hover:not(:checked) {
-    background-color: rgba(83, 52, 131, 0.3);
-}
-
 .drop-zone {
     background-color: #0f3460;
     border: 2px dashed #533483;
     border-radius: 16px;
     padding: 40px;
-    margin: 16px;
+    margin: 8px;
 }
 
 .drop-zone-active {
@@ -86,7 +66,7 @@ stackswitcher button:hover:not(:checked) {
     background-color: #16213e;
     border-radius: 8px;
     padding: 8px 12px;
-    margin: 2px 8px;
+    margin: 2px 4px;
     color: #c0c0d0;
 }
 
@@ -101,10 +81,16 @@ button.suggested-action {
     padding: 8px 20px;
     border: none;
     font-weight: bold;
+    font-size: 13px;
 }
 
 button.suggested-action:hover {
     background-color: #6a42a0;
+}
+
+button.suggested-action:disabled {
+    background-color: #3a2460;
+    color: #808090;
 }
 
 button.destructive-action {
@@ -113,6 +99,8 @@ button.destructive-action {
     border-radius: 10px;
     padding: 8px 20px;
     border: none;
+    font-weight: bold;
+    font-size: 13px;
 }
 
 button.destructive-action:hover {
@@ -123,6 +111,9 @@ button.flat {
     color: #a0a0c0;
     background: transparent;
     border: none;
+    font-size: 13px;
+    padding: 6px 12px;
+    border-radius: 8px;
 }
 
 button.flat:hover {
@@ -157,6 +148,7 @@ entry {
     border: 1px solid #533483;
     border-radius: 8px;
     padding: 8px 12px;
+    font-size: 13px;
 }
 
 entry:focus {
@@ -167,7 +159,7 @@ entry:focus {
     background-color: rgba(15, 52, 96, 0.3);
     border-radius: 12px;
     padding: 16px;
-    margin: 8px;
+    margin: 8px 0;
 }
 )";
 
@@ -181,12 +173,9 @@ void MainWindow::setup_css() {
     g_object_unref(provider);
 }
 
-void MainWindow::on_destroy(GtkWidget* widget, gpointer data) {
+void MainWindow::on_destroy(GtkWidget* /*widget*/, gpointer data) {
     FD_LOG("MainWindow::on_destroy — cleaning up");
     auto* self = static_cast<MainWindow*>(data);
-    if (self->receive_panel_) {
-        self->receive_panel_->stop_discovery();
-    }
     delete self;
     FD_LOG("MainWindow::on_destroy — done");
 }
@@ -198,49 +187,25 @@ MainWindow::MainWindow(GtkApplication* app) {
     gtk_window_set_title(GTK_WINDOW(window_), "FluxDrop");
     gtk_window_set_default_size(GTK_WINDOW(window_), 520, 650);
 
-    GtkWidget* main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    gtk_window_set_child(GTK_WINDOW(window_), main_box);
-
-    GtkWidget* top_panel = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
-    gtk_widget_add_css_class(top_panel, "top-panel");
-    gtk_box_append(GTK_BOX(main_box), top_panel);
-
     GtkIconTheme* theme = gtk_icon_theme_get_for_display(gdk_display_get_default());
     gtk_icon_theme_add_search_path(theme, "assets");
     gtk_window_set_default_icon_name("fluxdroplogo");
+    gtk_window_set_icon_name(GTK_WINDOW(window_), "fluxdroplogo");
 
-    stack_ = gtk_stack_new();
-    gtk_stack_set_transition_type(GTK_STACK(stack_), GTK_STACK_TRANSITION_TYPE_SLIDE_LEFT_RIGHT);
-    gtk_stack_set_transition_duration(GTK_STACK(stack_), 300);
-
-    send_panel_ = new FileSenderPanel(GTK_WINDOW(window_));
-    receive_panel_ = new DeviceListPanel(GTK_WINDOW(window_));
-
-    gtk_stack_add_titled(GTK_STACK(stack_), send_panel_->get_widget(), "send", "Send File");
-    gtk_stack_add_titled(GTK_STACK(stack_), receive_panel_->get_widget(), "receive", "Receive");
-
-    GtkWidget* switcher = gtk_stack_switcher_new();
-    gtk_stack_switcher_set_stack(GTK_STACK_SWITCHER(switcher), GTK_STACK(stack_));
-    gtk_widget_set_hexpand(switcher, TRUE);
-    gtk_widget_set_halign(switcher, GTK_ALIGN_CENTER);
-    gtk_box_append(GTK_BOX(top_panel), switcher);
-
-    gtk_widget_set_vexpand(stack_, TRUE);
-    gtk_box_append(GTK_BOX(main_box), stack_);
+    session_panel_ = new SessionPanel(GTK_WINDOW(window_));
+    gtk_window_set_child(GTK_WINDOW(window_), session_panel_->get_widget());
 
     g_signal_connect(window_, "destroy", G_CALLBACK(on_destroy), this);
 
-    receive_panel_->start_discovery();
-
     gtk_window_present(GTK_WINDOW(window_));
+    FD_LOG("MainWindow created");
 }
 
 MainWindow::~MainWindow() {
     FD_LOG("~MainWindow — deleting panels");
-    delete send_panel_;
-    send_panel_ = nullptr;
-    delete receive_panel_;
-    receive_panel_ = nullptr;
+    delete session_panel_;
+    session_panel_ = nullptr;
+    FD_LOG("~MainWindow — done");
 }
 
 static void activate_callback(GtkApplication* app, gpointer /*user_data*/) {
